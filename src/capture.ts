@@ -1,0 +1,161 @@
+import { chromium } from 'patchright';
+import { v4 as uuidv4 } from 'uuid';
+import { setupInterception } from './extraction/intercept.js';
+import { putKV } from './kv.js';
+import { dedupSet } from './dedup.js';
+import type { CaptureResult, LensPayload } from './types.js';
+
+const CAPTURE_TIMEOUT_MS = 30_000;
+const SETTLE_MS = 3_000; // passed to intercept.ts for post-load settle window
+
+// Detect token expiry from URL query parameters
+function detectExpiry(url: string): number | null {
+  try {
+    const parsed = new URL(url);
+    const params = parsed.searchParams;
+
+    // exp= (epoch seconds)
+    const exp = params.get('exp') ?? params.get('expires');
+    if (exp) {
+      const val = Number(exp);
+      // If it looks like epoch seconds (> year 2000)
+      if (val > 946_684_800 && val < 32_503_680_000) return val * 1000;
+    }
+
+    // X-Amz-Expires (relative seconds from X-Amz-Date)
+    const amzExpires = params.get('X-Amz-Expires');
+    const amzDate = params.get('X-Amz-Date');
+    if (amzExpires && amzDate) {
+      // X-Amz-Date format: 20240101T000000Z
+      const dateMatch = amzDate.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+      if (dateMatch) {
+        const date = new Date(
+          `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}T${dateMatch[4]}:${dateMatch[5]}:${dateMatch[6]}Z`
+        );
+        return date.getTime() + Number(amzExpires) * 1000;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Capture media URL + headers from the given page URL, with a timeout and ad filtering
+export async function capture(url: string): Promise<CaptureResult> {
+  const uuid = uuidv4();
+  const abortController = new AbortController();
+
+  // Hard abort at CAPTURE_TIMEOUT_MS
+  const timeout = setTimeout(() => abortController.abort(), CAPTURE_TIMEOUT_MS);
+
+  let browser;
+  try {
+    // Launch patchright's chromium - patches WebDriver fingerprints at binary level
+    browser = await chromium.launch({
+      channel: 'chrome',
+      headless: true,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-infobars',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--use-gl=angle',
+        '--use-angle=gl',
+      ],
+    });
+
+    // Context with UA + UA Client Hints alignment
+    const context = await browser.newContext({
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      extraHTTPHeaders: {
+        'Sec-CH-UA': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"Windows"',
+      },
+    });
+
+    // patchright handles webdriver/plugins - only these remain:
+    await context.addInitScript(() => {
+      // patchright does NOT cover window.chrome
+      (window as any).chrome = { runtime: {} };
+
+      // Spoof userAgentData to match the chosen UA string
+      Object.defineProperty(navigator, 'userAgentData', {
+        get: () => ({
+          brands: [
+            { brand: 'Google Chrome', version: '131' },
+            { brand: 'Chromium', version: '131' },
+            { brand: 'Not_A Brand', version: '24' },
+          ],
+          mobile: false,
+          platform: 'Windows',
+          getHighEntropyValues: (_hints: string[]) =>
+            Promise.resolve({
+              platform: 'Windows',
+              platformVersion: '15.0.0',
+              architecture: 'x86',
+              bitness: '64',
+              fullVersionList: [
+                { brand: 'Google Chrome', version: '131.0.0.0' },
+                { brand: 'Chromium', version: '131.0.0.0' },
+                { brand: 'Not_A Brand', version: '24.0.0.0' },
+              ],
+            }),
+        }),
+      });
+    });
+
+    // Create page first so we can pass it to setupInterception for load+settle
+    const page = await context.newPage();
+
+    // Set up interception before navigation - pass page for load+settle logic
+    const mediaPromise = setupInterception(context, page, abortController.signal, SETTLE_MS);
+
+    // Navigate
+    await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: CAPTURE_TIMEOUT_MS,
+    });
+
+    // Wait for media detection (resolves on first HLS hit or after load + settle)
+    const captured = await mediaPromise;
+
+    // Detect expiry from the captured URL
+    const maxTtlMs = Number(process.env.LENS_KV_MAX_TTL_MS ?? 3_600_000);
+    const now = Date.now();
+    const tokenExpiry = detectExpiry(captured.url);
+    const expiresAt = tokenExpiry ?? now + maxTtlMs;
+
+    // Build payload
+    const payload: LensPayload = {
+      mediaUrl: captured.url,
+      headers: captured.headers,
+      mediaType: captured.mediaType,
+      capturedAt: now,
+      expiresAt,
+    };
+
+    // Write to KV
+    await putKV(uuid, payload, expiresAt);
+
+    // Record dedup mapping
+    await dedupSet(url, uuid);
+
+    return { uuid, payload };
+  } catch (error) {
+    // Re-throw with capture error shape if not already
+    if (error && typeof error === 'object' && 'code' in error) {
+      throw error;
+    }
+    throw {
+      code: 'browser-launch-failed' as const,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    clearTimeout(timeout);
+    await browser?.close().catch(() => {});
+  }
+}
