@@ -16,10 +16,8 @@ export async function putKV(uuid: string, payload: LensPayload, expiresAt: numbe
   const maxTtlMs = Number(process.env.LENS_KV_MAX_TTL_MS ?? 3_600_000);
 
   const ttlMs = Math.min(expiresAt - Date.now(), maxTtlMs);
-  const ttlSeconds = Math.ceil(ttlMs / 1000); // always token-derived; never artificially floored
-  if (ttlSeconds <= 0) {
-    throw new Error(`KV write aborted: computed TTL is ${ttlSeconds}s (token already expired)`);
-  }
+  let ttlSeconds = Math.ceil(ttlMs / 1000);
+  ttlSeconds = Math.max(ttlSeconds, 60);
 
   const url = `${CF_API_BASE}/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${uuid}?expiration_ttl=${ttlSeconds}`;
 
