@@ -4,7 +4,7 @@ import type { Candidate, ManifestInfo, ScoreContext } from './types.js';
 
 function makeCandidate(overrides: Partial<Candidate> = {}): Candidate {
   return {
-    url: 'https://example.com/stream.m3u8',
+    url: 'https://example.com/seg001.ts',
     headers: {},
     mediaType: 'hls',
     capturedAt: 1000,
@@ -236,6 +236,72 @@ describe('scoreCandidate', () => {
       const m = makeManifest({ isLive: false, duration: 30, hasAudioTrack: false });
       expect(scoreCandidate(c, m, ctx)).toBe(-30);
     });
+  });
+});
+
+describe('SIG-08: HLS playlist type', () => {
+  it('M3U8 playlist URL with mediaType=hls -> +20 bonus', () => {
+    const c = makeCandidate({ url: 'https://cdn.example.com/stream.m3u8', mediaType: 'hls', area: null, capturedAt: 0 });
+    const ctx = makeContext({ maxObservedArea: 0, navigationStart: 0 });
+    expect(scoreCandidate(c, null, ctx)).toBe(20);
+  });
+
+  it('.ts segment URL with mediaType=hls (no .m3u8 in path) -> +0 bonus', () => {
+    const c = makeCandidate({ url: 'https://cdn.example.com/seg001.ts', mediaType: 'hls', area: null, capturedAt: 0 });
+    const ctx = makeContext({ maxObservedArea: 0, navigationStart: 0 });
+    expect(scoreCandidate(c, null, ctx)).toBe(0);
+  });
+
+  it('.mp4 URL with mediaType=mp4 -> +0 bonus (SIG-08 only applies to HLS)', () => {
+    const c = makeCandidate({ url: 'https://cdn.example.com/video.mp4', mediaType: 'mp4', area: null, capturedAt: 0 });
+    const ctx = makeContext({ maxObservedArea: 0, navigationStart: 0 });
+    expect(scoreCandidate(c, null, ctx)).toBe(0);
+  });
+
+  it('HLS URL with .m3u8 in path and query string -> +20 bonus (extension in path, not query)', () => {
+    const c = makeCandidate({
+      url: 'https://cdn.example.com/stream.m3u8?token=abc123',
+      mediaType: 'hls',
+      area: null,
+      capturedAt: 0,
+    });
+    const ctx = makeContext({ maxObservedArea: 0, navigationStart: 0 });
+    expect(scoreCandidate(c, null, ctx)).toBe(20);
+  });
+
+  it('combined: M3U8 playlist with area=0, capturedAt=0, no manifest -> exactly 20', () => {
+    const c = makeCandidate({ url: 'https://cdn.example.com/index.m3u8', mediaType: 'hls', area: 0, capturedAt: 0 });
+    const ctx = makeContext({ maxObservedArea: 0, navigationStart: 0 });
+    expect(scoreCandidate(c, null, ctx)).toBe(20);
+  });
+
+  it('combined: .ts segment with area=0, capturedAt=0, no manifest -> exactly 0', () => {
+    const c = makeCandidate({ url: 'https://cdn.example.com/seg001.ts', mediaType: 'hls', area: 0, capturedAt: 0 });
+    const ctx = makeContext({ maxObservedArea: 0, navigationStart: 0 });
+    expect(scoreCandidate(c, null, ctx)).toBe(0);
+  });
+
+  it('Behance bug scenario: .ts segment score=32 loses to M3U8 with identical signals', () => {
+    // Simulate a .ts candidate with some signals giving score=32 (e.g. area + timing)
+    const ctx = makeContext({ maxObservedArea: 1000, navigationStart: 0 });
+    const tsCandidate = makeCandidate({
+      url: 'https://cdn.adobe.com/chunk001.ts',
+      mediaType: 'hls',
+      area: 360, // 360/1000 * 50 = 18 points
+      capturedAt: 3500, // > 3000 → +15 points. Total = 33
+      precededByEndedStream: false,
+    });
+    const m3u8Candidate = makeCandidate({
+      url: 'https://cdn.adobe.com/index.m3u8',
+      mediaType: 'hls',
+      area: 360, // same area
+      capturedAt: 3500, // same timing
+      precededByEndedStream: false,
+    });
+    const tsScore = scoreCandidate(tsCandidate, null, ctx);
+    const m3u8Score = scoreCandidate(m3u8Candidate, null, ctx);
+    expect(m3u8Score).toBeGreaterThan(tsScore);
+    expect(m3u8Score - tsScore).toBe(20); // SIG-08 alone is the difference
   });
 });
 

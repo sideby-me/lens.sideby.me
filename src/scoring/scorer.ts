@@ -1,8 +1,26 @@
 import type { Candidate, ManifestInfo, ScoreContext } from './types.js';
 
+/** Returns true if the URL path contains '.m3u8' — indicating an HLS playlist/index, not a segment */
+function isPlaylistUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.toLowerCase().includes('.m3u8');
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Score a single candidate. Pure synchronous function — no I/O, no patchright imports.
  * Muted disqualification is NOT handled here — use filterMutedCandidates() before calling.
+ *
+ * Signal weights:
+ *   SIG-01: Area ratio        (0–50 pts)
+ *   SIG-03: Capture timing    (+7 or +15 pts)
+ *   SIG-04: Short duration    (–30 pts, VOD only)
+ *   SIG-05: Long duration     (+20 pts, VOD only)
+ *   SIG-06: Audio track       (+10 pts)
+ *   SIG-07: Post-ad sequence  (+25 pts)
+ *   SIG-08: HLS playlist URL  (+20 pts — M3U8 index preferred over .ts segment)
  */
 export function scoreCandidate(
   candidate: Candidate,
@@ -32,6 +50,14 @@ export function scoreCandidate(
 
   // SIG-07: Post-ad sequence
   if (candidate.precededByEndedStream) score += 25;
+
+  // SIG-08: HLS playlist type — prefer M3U8 index/playlist URLs over raw .ts segments
+  // A .ts segment URL indicates a single media segment; the player needs the M3U8 index.
+  if (candidate.mediaType === 'hls') {
+    if (isPlaylistUrl(candidate.url)) {
+      score += 20;
+    }
+  }
 
   return score;
 }
