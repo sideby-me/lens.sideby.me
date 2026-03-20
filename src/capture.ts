@@ -1,12 +1,11 @@
 import { chromium } from 'patchright';
 import { v4 as uuidv4 } from 'uuid';
-import { setupInterception } from './extraction/intercept.js';
+import { runObservationLoop } from './pipeline/observation-loop.js';
 import { putKV } from './kv.js';
 import { dedupSet } from './dedup.js';
 import type { CaptureResult, LensPayload } from './types.js';
 
 const CAPTURE_TIMEOUT_MS = 30_000;
-const SETTLE_MS = 3_000; // passed to intercept.ts for post-load settle window
 
 // Detect token expiry from URL query parameters
 function detectExpiry(url: string): number | null {
@@ -111,31 +110,41 @@ export async function capture(url: string): Promise<CaptureResult> {
     // Create page first so we can pass it to setupInterception for load+settle
     const page = await context.newPage();
 
-    // Set up interception before navigation - pass page for load+settle logic
-    const mediaPromise = setupInterception(context, page, abortController.signal, SETTLE_MS);
-
     // Navigate
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: CAPTURE_TIMEOUT_MS,
     });
 
-    // Wait for media detection (resolves on first HLS hit or after load + settle)
-    const captured = await mediaPromise;
+    const navigationStart = Date.now();
+
+    // Run the observation pipeline
+    const result = await runObservationLoop({
+      context,
+      page,
+      abortSignal: abortController.signal,
+      navigationStart,
+    });
+
+    if (result.lowConfidence) {
+      console.warn(`[lens] Low confidence capture for ${url} — best score: ${result.winner.score}, candidates: ${result.candidateCount}`);
+    }
 
     // Detect expiry from the captured URL
     const maxTtlMs = Number(process.env.LENS_KV_MAX_TTL_MS ?? 3_600_000);
     const now = Date.now();
-    const tokenExpiry = detectExpiry(captured.url);
+    const tokenExpiry = detectExpiry(result.winner.url);
     const expiresAt = tokenExpiry ?? now + maxTtlMs;
 
     // Build payload
     const payload: LensPayload = {
-      mediaUrl: captured.url,
-      headers: captured.headers,
-      mediaType: captured.mediaType,
+      mediaUrl: result.winner.url,
+      headers: result.winner.headers,
+      mediaType: result.winner.mediaType,
       capturedAt: now,
       expiresAt,
+      encrypted: result.manifest?.encrypted ?? undefined,
+      isLive: result.manifest?.isLive ?? undefined,
     };
 
     // Write to KV
