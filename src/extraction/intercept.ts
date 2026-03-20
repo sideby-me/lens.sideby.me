@@ -45,8 +45,24 @@ export interface CapturedMedia {
   mediaType: 'hls' | 'mp4' | 'other';
 }
 
+/** Raw candidate from network interception — no DOM signals yet */
+export interface RawCandidate {
+  url: string;
+  headers: Record<string, string>;
+  mediaType: 'hls' | 'mp4' | 'other';
+  capturedAt: number;
+  frameUrl: string | null;  // frame.url() for cross-origin correlation
+}
+
+export interface InterceptionOptions {
+  context: BrowserContext;
+  page: Page;
+  abortSignal: AbortSignal;
+  onCandidate: (candidate: RawCandidate) => void;
+}
+
 // Determine media type from URL and content type
-function classifyMedia(url: string, contentType?: string): 'hls' | 'mp4' | 'other' {
+export function classifyMedia(url: string, contentType?: string): 'hls' | 'mp4' | 'other' {
   const lower = url.toLowerCase();
   if (lower.includes('.m3u8') || contentType?.includes('mpegurl')) return 'hls';
   if (lower.includes('.mp4') || lower.includes('.m4v')) return 'mp4';
@@ -54,7 +70,7 @@ function classifyMedia(url: string, contentType?: string): 'hls' | 'mp4' | 'othe
 }
 
 // Check if a URL or content type represents media content
-function isMediaUrl(url: string, contentType?: string): boolean {
+export function isMediaUrl(url: string, contentType?: string): boolean {
   try {
     const pathname = new URL(url).pathname.toLowerCase();
 
@@ -74,7 +90,7 @@ function isMediaUrl(url: string, contentType?: string): boolean {
 }
 
 // Check if URL looks like HLS based on extension alone (for route handler, before response)
-function isHlsUrl(url: string): boolean {
+export function isHlsUrl(url: string): boolean {
   try {
     const pathname = new URL(url).pathname.toLowerCase();
     return pathname.includes('.m3u8');
@@ -84,124 +100,66 @@ function isHlsUrl(url: string): boolean {
 }
 
 // Set up network interception on a browser context
-export function setupInterception(
-  context: BrowserContext,
-  page: Page,
-  abortSignal: AbortSignal,
-  settleMs: number
-): Promise<CapturedMedia> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const adUrls: string[] = [];
-    const mediaCandidates: CapturedMedia[] = [];
+export function setupInterception(opts: InterceptionOptions): () => void {
+  // Captured request headers keyed by URL (set during route handler, read during response handler)
+  const requestHeadersByUrl = new Map<string, Record<string, string>>();
 
-    // Captured request headers keyed by URL (set during route handler, read during response handler)
-    const requestHeadersByUrl = new Map<string, Record<string, string>>();
+  function cleanup() {
+    opts.context.unroute('**', routeHandler).catch(() => {});
+    opts.context.off('response', responseHandler);
+  }
 
-    function cleanup() {
-      context.unroute('**', routeHandler).catch(() => {});
-      context.off('response', responseHandler);
-    }
+  // Route handler: intercept every request
+  async function routeHandler(route: Route) {
+    const request = route.request();
+    const url = request.url();
 
-    function finish(result: CapturedMedia) {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve(result);
-    }
-
-    function fail(err: { code: string; message: string }) {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(err);
-    }
-
-    // Route handler: intercept every request
-    async function routeHandler(route: Route) {
-      const request = route.request();
-      const url = request.url();
-
-      if (!isAdUrl(url)) {
-        // Capture request headers for later use in response handler
-        try {
-          requestHeadersByUrl.set(url, request.headers());
-        } catch {
-          // ignore
-        }
-      } else {
-        adUrls.push(url);
+    if (!isAdUrl(url)) {
+      // Capture request headers for later use in response handler
+      try {
+        requestHeadersByUrl.set(url, request.headers());
+      } catch {
+        // ignore
       }
-
-      // Always continue
-      route.continue().catch(() => {});
     }
 
-    // Response handler: inspect content-type for media classification
-    async function responseHandler(response: { url(): string; headers(): Record<string, string> }) {
-      if (settled) return;
+    // Always continue
+    route.continue().catch(() => {});
+  }
 
-      const url = response.url();
-      const contentType = response.headers()['content-type'] ?? '';
+  // Response handler: inspect content-type for media classification
+  async function responseHandler(response: { url(): string; headers(): Record<string, string>; frame(): any }) {
+    const url = response.url();
+    const contentType = response.headers()['content-type'] ?? '';
 
-      if (isAdUrl(url)) return;
-      if (!isMediaUrl(url, contentType)) return;
+    if (isAdUrl(url)) return;
+    if (!isMediaUrl(url, contentType)) return;
 
-      const reqHeaders = requestHeadersByUrl.get(url) ?? {};
-      const mediaType = classifyMedia(url, contentType);
+    const reqHeaders = requestHeadersByUrl.get(url) ?? {};
+    const mediaType = classifyMedia(url, contentType);
 
-      const candidate: CapturedMedia = { url, headers: reqHeaders, mediaType };
-
-      // Prefer HLS - resolve immediately
-      if (mediaType === 'hls' || isHlsUrl(url)) {
-        finish(candidate);
-        return;
-      }
-
-      // Collect non-HLS candidates for post-settle selection
-      mediaCandidates.push(candidate);
+    let frameUrl: string | null = null;
+    try {
+      frameUrl = response.frame()?.url() ?? null;
+    } catch {
+      // cross-origin frame may throw
     }
 
-    // Register handlers
-    context.route('**', routeHandler).catch(() => {});
-    context.on('response', responseHandler);
-
-    // Abort handler (hard 30s timeout)
-    abortSignal.addEventListener('abort', () => {
-      if (settled) return;
-
-      // If we have candidates collected before abort, use best (mp4 preferred)
-      if (mediaCandidates.length > 0) {
-        const best = mediaCandidates.find(c => c.mediaType === 'mp4') ?? mediaCandidates[0];
-        finish(best);
-        return;
-      }
-
-      if (adUrls.length > 0) {
-        fail({ code: 'only-ads-detected', message: `Only ${adUrls.length} ad URL(s) captured` });
-      } else {
-        fail({ code: 'no-media-found', message: 'Capture timed out with no media found' });
-      }
+    opts.onCandidate({
+      url,
+      headers: reqHeaders,
+      mediaType,
+      capturedAt: Date.now(),
+      frameUrl,
     });
+  }
 
-    // Page load + settle wait for non-HLS candidates
-    Promise.race([
-      page.waitForLoadState('load').catch(() => {}),
-      new Promise<void>(r => setTimeout(r, settleMs * 3)), // generous bound if load never fires
-    ])
-      .then(() => {
-        if (settled) return;
-        // Wait the settle window after load
-        return new Promise<void>(r => setTimeout(r, settleMs));
-      })
-      .then(() => {
-        if (settled) return;
-        if (mediaCandidates.length > 0) {
-          const best = mediaCandidates.find(c => c.mediaType === 'mp4') ?? mediaCandidates[0];
-          finish(best);
-        }
-        // If no candidates yet, keep listening until abort fires
-      })
-      .catch(() => {});
-  });
+  // Register handlers
+  opts.context.route('**', routeHandler).catch(() => {});
+  opts.context.on('response', responseHandler);
+
+  // Abort handler
+  opts.abortSignal.addEventListener('abort', cleanup, { once: true });
+
+  return cleanup;
 }
