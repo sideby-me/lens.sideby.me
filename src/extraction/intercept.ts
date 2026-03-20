@@ -1,7 +1,7 @@
 import type { BrowserContext, Page, Route } from 'patchright';
 
 // Ad network domains and path patterns to let through (not abort)
-const AD_DOMAINS = ['doubleclick.net', 'googlesyndication.com', '2mdn.net', 'ads.youtube.com', 'imasdk.googleapis.com'];
+const AD_DOMAINS = ['doubleclick.net', 'googlesyndication.com', '2mdn.net', 'ads.youtube.com', 'imasdk.googleapis.com', 'adtng.com'];
 
 const AD_PATHS = ['/ads/', '/preroll/', '/vast/', '/vmap/'];
 

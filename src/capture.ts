@@ -132,6 +132,13 @@ export async function capture(url: string): Promise<CaptureResult> {
       console.warn(`[lens] Low confidence capture for ${url} — best score: ${result.winner.score}, candidates: ${result.candidateCount}`);
     }
 
+    // Ensure Referer is present — some pages suppress it via referrer policy,
+    // but the upstream CDN may need it for hotlink validation.
+    const winnerHeaders = { ...result.winner.headers };
+    if (!winnerHeaders['referer'] && !winnerHeaders['Referer']) {
+      winnerHeaders['referer'] = url;
+    }
+
     // Detect expiry from the captured URL
     const maxTtlMs = Number(process.env.LENS_KV_MAX_TTL_MS ?? 3_600_000);
     const now = Date.now();
@@ -141,7 +148,7 @@ export async function capture(url: string): Promise<CaptureResult> {
     // Build payload
     const payload: LensPayload = {
       mediaUrl: result.winner.url,
-      headers: result.winner.headers,
+      headers: winnerHeaders,
       mediaType: result.winner.mediaType,
       capturedAt: now,
       expiresAt,
