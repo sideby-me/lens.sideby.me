@@ -7,6 +7,8 @@ export interface LensPayload {
   mediaType: 'hls' | 'mp4' | 'other';
   capturedAt: number;
   expiresAt: number;
+  encrypted?: boolean;   // SIG-08: EXT-X-KEY METHOD != NONE
+  isLive?: boolean;      // SIG-05: live stream detection result
 }
 
 // Job data queued in BullMQ
