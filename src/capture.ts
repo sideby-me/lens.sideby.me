@@ -126,6 +126,8 @@ export async function capture(url: string): Promise<CaptureResult> {
       navigationStart,
     });
 
+    console.info(`[lens] Captured ${result.winner.url} (score: ${result.winner.score}, runner-up: ${result.runnerUpScore ?? 'none'}, candidates: ${result.candidateCount})`);
+
     if (result.lowConfidence) {
       console.warn(`[lens] Low confidence capture for ${url} — best score: ${result.winner.score}, candidates: ${result.candidateCount}`);
     }
