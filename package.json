@@ -9,25 +9,29 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "format": "prettier --write src/"
+    "format": "prettier --write src/",
+    "test": "vitest run --reporter=verbose"
   },
   "dependencies": {
-    "patchright": "^1.49.1",
     "bullmq": "^5.34.8",
-    "ioredis": "^5.4.2",
-    "express": "^4.21.2",
-    "zod": "^3.24.1",
     "dotenv": "^16.4.7",
-    "uuid": "^11.0.5"
+    "express": "^4.21.2",
+    "ioredis": "^5.4.2",
+    "m3u8-parser": "^7.2.0",
+    "patchright": "^1.49.1",
+    "uuid": "^11.0.5",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/m3u8-parser": "^7.2.6",
+    "@types/node": "^22.10.5",
+    "@types/uuid": "^10.0.0",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "@types/express": "^5.0.0",
-    "@types/uuid": "^10.0.0",
-    "@types/node": "^22.10.5",
-    "prettier": "^3.4.2",
     "typescript-eslint": "^8.20.0",
-    "eslint": "^9.18.0"
+    "vitest": "^4.1.0"
   }
 }
