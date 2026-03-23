@@ -1,5 +1,15 @@
 export type CaptureErrorCode = 'only-ads-detected' | 'timeout' | 'no-media-found' | 'browser-launch-failed';
 
+// LENS-03: Alternative stream entry for ambiguous/low-confidence payloads
+export interface AlternativeEntry {
+  mediaUrl: string;
+  mediaType: 'hls' | 'mp4' | 'other';
+  durationSec: number | null;
+  bitrate: number | null;
+  isLive: boolean | undefined;
+  headers: Record<string, string>;
+}
+
 // Payload stored in KV and returned from capture
 export interface LensPayload {
   mediaUrl: string;
@@ -9,6 +19,9 @@ export interface LensPayload {
   expiresAt: number;
   encrypted?: boolean;   // SIG-08: EXT-X-KEY METHOD != NONE
   isLive?: boolean;      // SIG-05: live stream detection result
+  lowConfidence: boolean;   // LENS-01: winner score below MIN_MEANINGFUL_SCORE
+  ambiguous: boolean;       // LENS-02: winner/runner-up gap below threshold
+  alternatives: AlternativeEntry[];  // LENS-03: sorted non-winner candidates
 }
 
 // Job data queued in BullMQ

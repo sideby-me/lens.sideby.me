@@ -2,19 +2,22 @@ import { describe, it, expect } from 'vitest';
 import type { Candidate, ScoredCandidate, ManifestInfo, ScoreContext } from './types.js';
 import type { LensPayload } from '../types.js';
 
-describe('LensPayload type — additive optional fields', () => {
-  it('an object conforming to original LensPayload shape (without encrypted/isLive) is assignable', () => {
+describe('LensPayload type — required and optional fields', () => {
+  it('an object with all required fields (including v1.1 fields) is assignable', () => {
     const payload: LensPayload = {
       mediaUrl: 'https://example.com/stream.m3u8',
       headers: {},
       mediaType: 'hls',
       capturedAt: Date.now(),
       expiresAt: Date.now() + 3600_000,
+      lowConfidence: false,
+      ambiguous: false,
+      alternatives: [],
     };
     expect(payload).toBeDefined();
   });
 
-  it('an object with encrypted: true and isLive: true is assignable to LensPayload', () => {
+  it('an object with encrypted: true, isLive: true, and v1.1 fields is assignable to LensPayload', () => {
     const payload: LensPayload = {
       mediaUrl: 'https://example.com/stream.m3u8',
       headers: {},
@@ -23,6 +26,9 @@ describe('LensPayload type — additive optional fields', () => {
       expiresAt: Date.now() + 3600_000,
       encrypted: true,
       isLive: true,
+      lowConfidence: false,
+      ambiguous: false,
+      alternatives: [],
     };
     expect(payload.encrypted).toBe(true);
     expect(payload.isLive).toBe(true);

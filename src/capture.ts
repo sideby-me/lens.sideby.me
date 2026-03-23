@@ -146,6 +146,8 @@ export async function capture(url: string): Promise<CaptureResult> {
     const expiresAt = tokenExpiry ?? now + maxTtlMs;
 
     // Build payload
+    // Note: ambiguous and alternatives are populated by Plan 02 (observation-loop
+    // will expose nonWinners from WinnerResult). Defaults used here until then.
     const payload: LensPayload = {
       mediaUrl: result.winner.url,
       headers: winnerHeaders,
@@ -154,6 +156,9 @@ export async function capture(url: string): Promise<CaptureResult> {
       expiresAt,
       encrypted: result.manifest?.encrypted ?? undefined,
       isLive: result.manifest?.isLive ?? undefined,
+      lowConfidence: result.lowConfidence,
+      ambiguous: false,
+      alternatives: [],
     };
 
     // Write to KV
