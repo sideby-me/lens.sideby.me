@@ -3,17 +3,20 @@ import { setupInterception } from '../extraction/intercept.js';
 import { probeVideoElement, clickLargestVideo } from '../extraction/dom-probe.js';
 import { scoreCandidate, filterMutedCandidates } from '../scoring/scorer.js';
 import { fetchAndParseManifest } from '../scoring/manifest-parser.js';
-import { selectWinner } from '../scoring/select-winner.js';
+import { selectWinner, MIN_MEANINGFUL_SCORE } from '../scoring/select-winner.js';
 import { deduplicateVariants } from '../scoring/variant-dedup.js';
 import { CandidateStore } from '../scoring/candidate-store.js';
 import type { Candidate, ScoredCandidate, ManifestInfo, ScoreContext } from '../scoring/types.js';
 import type { WinnerResult } from '../scoring/select-winner.js';
 import type { VideoProbeResult } from '../extraction/dom-probe.js';
+import type { AlternativeEntry } from '../types.js';
 
 const EARLY_STOP_THRESHOLD = Number(process.env.EARLY_STOP_THRESHOLD ?? 70);
 const MIN_OBSERVATION_MS = Number(process.env.MIN_OBSERVATION_MS ?? 5000);
 const MAX_OBSERVATION_MS = Number(process.env.MAX_OBSERVATION_MS ?? 20000);
 const NON_AUTOPLAY_WAIT_MS = Number(process.env.NON_AUTOPLAY_WAIT_MS ?? 4000);
+const LENS_AMBIGUOUS_THRESHOLD = Number(process.env.LENS_AMBIGUOUS_THRESHOLD ?? 20);
+const LENS_MIN_ALTERNATIVE_SCORE = Number(process.env.LENS_MIN_ALTERNATIVE_SCORE ?? 5);
 
 export interface ObservationResult {
   winner: ScoredCandidate;
@@ -21,6 +24,8 @@ export interface ObservationResult {
   manifest: ManifestInfo | null;
   runnerUpScore: number | null;
   candidateCount: number;
+  ambiguous: boolean;          // LENS-02: gap between winner and runner-up below threshold
+  alternatives: AlternativeEntry[];  // LENS-03: filtered non-winner candidates
 }
 
 export interface ObservationOptions {
@@ -28,6 +33,7 @@ export interface ObservationOptions {
   page: Page;
   abortSignal: AbortSignal;
   navigationStart: number;  // Date.now() at page navigation
+  pageUrl: string;          // The URL Lens navigated to, used for Referer injection on alternatives
 }
 
 /**
@@ -75,8 +81,33 @@ function detectPostAdSequences(
   });
 }
 
+function buildAlternatives(
+  nonWinners: ScoredCandidate[],
+  manifests: Map<string, ManifestInfo | null>,
+  pageUrl: string,
+  minScore: number,
+): AlternativeEntry[] {
+  return nonWinners
+    .filter(c => c.score >= minScore)
+    .map(c => {
+      const manifest = manifests.get(c.url) ?? null;
+      const headers = { ...c.headers };
+      if (!headers['referer'] && !headers['Referer']) {
+        headers['referer'] = pageUrl;
+      }
+      return {
+        mediaUrl: c.url,
+        mediaType: c.mediaType,
+        durationSec: manifest ? manifest.duration : null,
+        bitrate: c.bitrate,
+        isLive: manifest ? manifest.isLive : undefined,
+        headers,
+      };
+    });
+}
+
 export async function runObservationLoop(opts: ObservationOptions): Promise<ObservationResult> {
-  const { context, page, abortSignal, navigationStart } = opts;
+  const { context, page, abortSignal, navigationStart, pageUrl } = opts;
   const store = new CandidateStore();
   const manifests = new Map<string, ManifestInfo | null>();
   const probeResults = new Map<string, VideoProbeResult>();
@@ -237,13 +268,14 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
           return { ...c, score };
         });
 
-        const result = selectWinner(scored);
+        const result = selectWinner(scored, MIN_MEANINGFUL_SCORE, LENS_AMBIGUOUS_THRESHOLD);
         if (!result) {
           fail({ code: 'no-media-found', message: 'No candidates survived filtering' });
           return;
         }
 
         const winnerManifest = manifests.get(result.winner.url) ?? null;
+        const alternatives = buildAlternatives(result.nonWinners, manifests, pageUrl, LENS_MIN_ALTERNATIVE_SCORE);
 
         done({
           winner: result.winner,
@@ -251,6 +283,8 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
           manifest: winnerManifest,
           runnerUpScore: result.runnerUpScore,
           candidateCount: result.candidateCount,
+          ambiguous: result.ambiguous,       // LENS-02
+          alternatives,                       // LENS-03
         });
       }
     });
@@ -259,3 +293,6 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
     throw err;
   }
 }
+
+// Test-only export — allows unit testing of the pure helper without running the full loop
+export { buildAlternatives as _buildAlternatives };
