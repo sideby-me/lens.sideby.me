@@ -124,6 +124,7 @@ export async function capture(url: string): Promise<CaptureResult> {
       page,
       abortSignal: abortController.signal,
       navigationStart,
+      pageUrl: url,   // used for Referer injection on alternatives
     });
 
     console.info(`[lens] Captured ${result.winner.url} (score: ${result.winner.score}, runner-up: ${result.runnerUpScore ?? 'none'}, candidates: ${result.candidateCount})`);
@@ -146,8 +147,6 @@ export async function capture(url: string): Promise<CaptureResult> {
     const expiresAt = tokenExpiry ?? now + maxTtlMs;
 
     // Build payload
-    // Note: ambiguous and alternatives are populated by Plan 02 (observation-loop
-    // will expose nonWinners from WinnerResult). Defaults used here until then.
     const payload: LensPayload = {
       mediaUrl: result.winner.url,
       headers: winnerHeaders,
@@ -156,9 +155,9 @@ export async function capture(url: string): Promise<CaptureResult> {
       expiresAt,
       encrypted: result.manifest?.encrypted ?? undefined,
       isLive: result.manifest?.isLive ?? undefined,
-      lowConfidence: result.lowConfidence,
-      ambiguous: false,
-      alternatives: [],
+      lowConfidence: result.lowConfidence,    // LENS-01
+      ambiguous: result.ambiguous,            // LENS-02
+      alternatives: result.alternatives,      // LENS-03
     };
 
     // Write to KV
