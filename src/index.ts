@@ -50,6 +50,9 @@ const worker = startWorker({
       playbackUrl: `${pipeProxyUrl}?uuid=${result.uuid}`,
       mediaType: result.payload.mediaType,
       expiresAt: result.payload.expiresAt,
+      lowConfidence: result.payload.lowConfidence,
+      ambiguous: result.payload.ambiguous,
+      alternatives: result.payload.alternatives,
     });
     closeSSE(res);
     activeStreams.delete(jobId);
@@ -112,6 +115,9 @@ app.post('/capture', authMiddleware, async (req, res) => {
           playbackUrl: `${pipeProxyUrl}?uuid=${cachedUuid}`,
           mediaType: payload.mediaType,
           expiresAt: payload.expiresAt,
+          lowConfidence: payload.lowConfidence,
+          ambiguous: payload.ambiguous,
+          alternatives: payload.alternatives,
         });
         closeSSE(res);
         return;
