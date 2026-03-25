@@ -6,10 +6,7 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci
-
-# Install and verify
-RUN npx patchright install chrome && \
-    find /ms-playwright -name "chrome" -type f
+RUN npx patchright install chrome
 
 COPY . .
 RUN npm run build
