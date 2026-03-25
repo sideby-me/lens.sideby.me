@@ -62,6 +62,10 @@ export async function capture(url: string): Promise<CaptureResult> {
         '--no-default-browser-check',
         '--use-gl=angle',
         '--use-angle=gl',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage', // important — /dev/shm is small on Railway
+        '--disable-gpu',
       ],
     });
 
@@ -124,14 +128,23 @@ export async function capture(url: string): Promise<CaptureResult> {
       page,
       abortSignal: abortController.signal,
       navigationStart,
-      pageUrl: url,   // used for Referer injection on alternatives
+      pageUrl: url, // used for Referer injection on alternatives
     });
 
-    console.info(`[lens] Captured ${result.winner.url} (score: ${result.winner.score}, runner-up: ${result.runnerUpScore ?? 'none'}, candidates: ${result.candidateCount})`);
+    console.info(
+      `[lens] Captured ${result.winner.url} (score: ${result.winner.score}, runner-up: ${result.runnerUpScore ?? 'none'}, candidates: ${result.candidateCount})`
+    );
 
     if (result.lowConfidence) {
-      console.warn(`[lens] Low confidence capture for ${url} — best score: ${result.winner.score}, candidates: ${result.candidateCount}`);
+      console.warn(
+        `[lens] Low confidence capture for ${url} — best score: ${result.winner.score}, candidates: ${result.candidateCount}`
+      );
     }
+
+    // Detect IP-bound token: some CDNs embed the capture IP in the path and reject
+    // requests from any other IP. Pipe detects this flag and routes through the home relay.
+    const IP_IN_PATH = /\/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}[:/]/;
+    const ipBound = IP_IN_PATH.test(result.winner.url);
 
     // Ensure Referer is present — some pages suppress it via referrer policy,
     // but the upstream CDN may need it for hotlink validation.
@@ -155,9 +168,10 @@ export async function capture(url: string): Promise<CaptureResult> {
       expiresAt,
       encrypted: result.manifest?.encrypted ?? undefined,
       isLive: result.manifest?.isLive ?? undefined,
-      lowConfidence: result.lowConfidence,    // LENS-01
-      ambiguous: result.ambiguous,            // LENS-02
-      alternatives: result.alternatives,      // LENS-03
+      lowConfidence: result.lowConfidence, // LENS-01
+      ambiguous: result.ambiguous, // LENS-02
+      alternatives: result.alternatives, // LENS-03
+      ipBound: ipBound || undefined, // omit false to keep payload lean
     };
 
     // Write to KV

@@ -152,6 +152,46 @@ app.post('/capture', authMiddleware, async (req, res) => {
   }
 });
 
+// Relay endpoint: pipe calls this when a captured token is IP-bound.
+// The home server makes the upstream fetch from its own IP (which signed the token).
+app.post('/relay/fetch', authMiddleware, async (req, res) => {
+  const { url, headers } = req.body as { url?: string; headers?: Record<string, unknown> };
+
+  if (!url || typeof url !== 'string') {
+    res.status(400).json({ error: 'Missing url' });
+    return;
+  }
+  try {
+    new URL(url);
+  } catch {
+    res.status(400).json({ error: 'Invalid URL' });
+    return;
+  }
+
+  const forwardHeaders: Record<string, string> = {};
+  if (headers && typeof headers === 'object') {
+    for (const [k, v] of Object.entries(headers)) {
+      if (typeof v === 'string') forwardHeaders[k] = v;
+    }
+  }
+
+  try {
+    const upstream = await fetch(url, { headers: forwardHeaders, redirect: 'follow' });
+    const body = await upstream.text();
+    res.json({
+      status: upstream.status,
+      contentType: upstream.headers.get('content-type') ?? 'application/octet-stream',
+      cacheControl: upstream.headers.get('cache-control') ?? null,
+      body,
+    });
+  } catch (err) {
+    res.status(502).json({
+      error: 'Relay fetch failed',
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`[lens] Server listening on port ${PORT}`);

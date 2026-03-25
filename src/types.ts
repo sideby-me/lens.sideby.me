@@ -22,6 +22,7 @@ export interface LensPayload {
   lowConfidence: boolean;   // LENS-01: winner score below MIN_MEANINGFUL_SCORE
   ambiguous: boolean;       // LENS-02: winner/runner-up gap below threshold
   alternatives: AlternativeEntry[];  // LENS-03: sorted non-winner candidates
+  ipBound?: boolean;     // token path encodes the capture IP — pipe must relay through home server
 }
 
 // Job data queued in BullMQ
