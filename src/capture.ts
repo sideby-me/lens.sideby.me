@@ -64,7 +64,7 @@ export async function capture(url: string): Promise<CaptureResult> {
         '--use-angle=gl',
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage', // important — /dev/shm is small on Railway
+        '--disable-dev-shm-usage',
         '--disable-gpu',
       ],
     });
