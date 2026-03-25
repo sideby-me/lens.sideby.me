@@ -6,10 +6,10 @@ export const DEFAULT_AMBIGUOUS_THRESHOLD = 20;
 export interface WinnerResult {
   winner: ScoredCandidate;
   lowConfidence: boolean;
-  runnerUpScore: number | null;  // For Phase 3 logging
-  candidateCount: number;         // For Phase 3 logging
-  ambiguous: boolean;             // LENS-02: gap < ambiguousThreshold
-  nonWinners: ScoredCandidate[];  // LENS-03: sorted score-DESC, winner excluded
+  runnerUpScore: number | null; // For Phase 3 logging
+  candidateCount: number; // For Phase 3 logging
+  ambiguous: boolean; // LENS-02: gap < ambiguousThreshold
+  nonWinners: ScoredCandidate[]; // LENS-03: sorted score-DESC, winner excluded
 }
 
 /**
@@ -32,7 +32,7 @@ export interface WinnerResult {
 export function selectWinner(
   candidates: ScoredCandidate[],
   minMeaningfulScore: number = MIN_MEANINGFUL_SCORE,
-  ambiguousThreshold: number = DEFAULT_AMBIGUOUS_THRESHOLD,
+  ambiguousThreshold: number = DEFAULT_AMBIGUOUS_THRESHOLD
 ): WinnerResult | null {
   if (candidates.length === 0) return null;
 
@@ -49,10 +49,8 @@ export function selectWinner(
   const runnerUp = sorted.length > 1 ? sorted[1] : null;
 
   const lowConfidence = winner.score < minMeaningfulScore;
-  const ambiguous = runnerUp !== null
-    ? (winner.score - runnerUp.score) < ambiguousThreshold
-    : false;
-  const nonWinners = sorted.slice(1);  // everything after winner, already score-DESC
+  const ambiguous = runnerUp !== null ? winner.score - runnerUp.score < ambiguousThreshold : false;
+  const nonWinners = sorted.slice(1); // everything after winner, already score-DESC
 
   return {
     winner,

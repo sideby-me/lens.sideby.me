@@ -24,16 +24,16 @@ export interface ObservationResult {
   manifest: ManifestInfo | null;
   runnerUpScore: number | null;
   candidateCount: number;
-  ambiguous: boolean;          // LENS-02: gap between winner and runner-up below threshold
-  alternatives: AlternativeEntry[];  // LENS-03: filtered non-winner candidates
+  ambiguous: boolean; // LENS-02: gap between winner and runner-up below threshold
+  alternatives: AlternativeEntry[]; // LENS-03: filtered non-winner candidates
 }
 
 export interface ObservationOptions {
   context: BrowserContext;
   page: Page;
   abortSignal: AbortSignal;
-  navigationStart: number;  // Date.now() at page navigation
-  pageUrl: string;          // The URL Lens navigated to, used for Referer injection on alternatives
+  navigationStart: number; // Date.now() at page navigation
+  pageUrl: string; // The URL Lens navigated to, used for Referer injection on alternatives
 }
 
 /**
@@ -53,10 +53,7 @@ function estimateBitrate(manifest: ManifestInfo): number | null {
  * A candidate with ended manifest that appeared before other candidates
  * suggests it was an ad that finished playing.
  */
-function detectPostAdSequences(
-  candidates: Candidate[],
-  manifests: Map<string, ManifestInfo | null>,
-): Candidate[] {
+function detectPostAdSequences(candidates: Candidate[], manifests: Map<string, ManifestInfo | null>): Candidate[] {
   // Find candidates whose manifests are confirmed ended (VOD, not live)
   const endedCandidates = candidates.filter(c => {
     const m = manifests.get(c.url);
@@ -85,7 +82,7 @@ function buildAlternatives(
   nonWinners: ScoredCandidate[],
   manifests: Map<string, ManifestInfo | null>,
   pageUrl: string,
-  minScore: number,
+  minScore: number
 ): AlternativeEntry[] {
   return nonWinners
     .filter(c => c.score >= minScore)
@@ -118,16 +115,16 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
     context,
     page,
     abortSignal,
-    onCandidate: (raw) => {
+    onCandidate: raw => {
       store.add({
         url: raw.url,
         headers: raw.headers,
         mediaType: raw.mediaType,
         capturedAt: raw.capturedAt,
-        area: null,           // filled by probe
-        muted: false,         // filled by probe
+        area: null, // filled by probe
+        muted: false, // filled by probe
         precededByEndedStream: false, // filled by ended-stream detection
-        bitrate: null,        // filled by manifest parsing
+        bitrate: null, // filled by manifest parsing
       });
     },
   });
@@ -171,9 +168,13 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
       }, MAX_OBSERVATION_MS);
 
       // Abort signal
-      abortSignal.addEventListener('abort', () => {
-        evaluateAndFinish();
-      }, { once: true });
+      abortSignal.addEventListener(
+        'abort',
+        () => {
+          evaluateAndFinish();
+        },
+        { once: true }
+      );
 
       // Poll every 1000ms to probe, parse manifests, score, check early stop
       const pollInterval = setInterval(async () => {
@@ -195,7 +196,7 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
               navigationStart,
               candidateCount: enriched.length,
             };
-            
+
             const scored = enriched.map(c => {
               const manifest = manifests.get(c.url) ?? null;
               return { ...c, score: scoreCandidate(c, manifest, ctx) };
@@ -283,8 +284,8 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
           manifest: winnerManifest,
           runnerUpScore: result.runnerUpScore,
           candidateCount: result.candidateCount,
-          ambiguous: result.ambiguous,       // LENS-02
-          alternatives,                       // LENS-03
+          ambiguous: result.ambiguous, // LENS-02
+          alternatives, // LENS-03
         });
       }
     });

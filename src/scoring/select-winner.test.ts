@@ -83,20 +83,14 @@ describe('select-winner — LENS-01 lowConfidence', () => {
 describe('select-winner — LENS-02 ambiguous detection', () => {
   // Test 3: winner=30, runner-up=15, threshold=20 → ambiguous: true (gap=15 < 20)
   it('returns ambiguous:true when gap between winner and runner-up is less than threshold', () => {
-    const candidates = [
-      makeCandidate({ score: 30, url: 'winner' }),
-      makeCandidate({ score: 15, url: 'runner-up' }),
-    ];
+    const candidates = [makeCandidate({ score: 30, url: 'winner' }), makeCandidate({ score: 15, url: 'runner-up' })];
     const result = selectWinner(candidates, MIN_MEANINGFUL_SCORE, 20);
     expect(result?.ambiguous).toBe(true);
   });
 
   // Test 4: winner=50, runner-up=15, threshold=20 → ambiguous: false (gap=35 > 20)
   it('returns ambiguous:false when gap between winner and runner-up exceeds threshold', () => {
-    const candidates = [
-      makeCandidate({ score: 50, url: 'winner' }),
-      makeCandidate({ score: 15, url: 'runner-up' }),
-    ];
+    const candidates = [makeCandidate({ score: 50, url: 'winner' }), makeCandidate({ score: 15, url: 'runner-up' })];
     const result = selectWinner(candidates, MIN_MEANINGFUL_SCORE, 20);
     expect(result?.ambiguous).toBe(false);
   });

@@ -10,10 +10,7 @@ export interface VideoProbeResult {
  * Returns area (width*height from boundingBox) and muted state.
  * Cross-origin frames that throw on evaluate() return null for area and false for muted.
  */
-export async function probeVideoElement(
-  page: Page,
-  candidateUrl: string,
-): Promise<VideoProbeResult> {
+export async function probeVideoElement(page: Page, candidateUrl: string): Promise<VideoProbeResult> {
   const frames = page.frames();
   for (const frame of frames) {
     try {
@@ -72,9 +69,11 @@ export async function clickLargestVideo(page: Page): Promise<boolean> {
         }
 
         // Check common play button containers
-        const playButtons = Array.from(document.querySelectorAll(
-          '[class*="play"], [aria-label*="play" i], [data-testid*="play"], button[class*="video"]'
-        ));
+        const playButtons = Array.from(
+          document.querySelectorAll(
+            '[class*="play"], [aria-label*="play" i], [data-testid*="play"], button[class*="video"]'
+          )
+        );
         for (const btn of playButtons) {
           const rect = btn.getBoundingClientRect();
           if (rect.width > 20 && rect.height > 20) {
@@ -118,7 +117,7 @@ export async function clickLargestVideo(page: Page): Promise<boolean> {
             const sorted = videos.sort((a, b) => {
               const ra = a.getBoundingClientRect();
               const rb = b.getBoundingClientRect();
-              return (rb.width * rb.height) - (ra.width * ra.height);
+              return rb.width * rb.height - ra.width * ra.height;
             });
             const rect = sorted[0].getBoundingClientRect();
             return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };

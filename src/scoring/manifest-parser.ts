@@ -7,7 +7,7 @@ type ParsedManifest = InstanceType<typeof Parser>['manifest'];
 
 export async function fetchAndParseManifest(
   url: string,
-  headers: Record<string, string>,
+  headers: Record<string, string>
 ): Promise<ManifestInfo | null> {
   try {
     const manifest = await doFetch(url, headers);
@@ -24,10 +24,7 @@ export async function fetchAndParseManifest(
   }
 }
 
-async function doFetch(
-  url: string,
-  headers: Record<string, string>,
-): Promise<ParsedManifest | null> {
+async function doFetch(url: string, headers: Record<string, string>): Promise<ParsedManifest | null> {
   let body: string;
   try {
     const response = await fetch(url, { headers });
@@ -45,11 +42,7 @@ async function doFetch(
   return parser.manifest;
 }
 
-async function detectLive(
-  url: string,
-  headers: Record<string, string>,
-  manifest: ParsedManifest,
-): Promise<boolean> {
+async function detectLive(url: string, headers: Record<string, string>, manifest: ParsedManifest): Promise<boolean> {
   // Tier 1 — definitive: playlistType present
   const playlistType = manifest.playlistType?.toUpperCase();
   if (playlistType === 'EVENT' || playlistType === 'LIVE') return true;
@@ -59,7 +52,7 @@ async function detectLive(
   if (manifest.endList === true) return false;
 
   // Tier 2 — ambiguous: no playlistType, no endList; re-fetch after delay
-  await new Promise<void>((resolve) => setTimeout(resolve, LIVE_RECHECK_MS));
+  await new Promise<void>(resolve => setTimeout(resolve, LIVE_RECHECK_MS));
 
   try {
     const reManifest = await doFetch(url, headers);
@@ -71,9 +64,7 @@ async function detectLive(
 }
 
 function computeDuration(manifest: ParsedManifest): number {
-  return (
-    manifest.segments?.reduce((sum: number, s: { duration?: number }) => sum + (s.duration ?? 0), 0) ?? 0
-  );
+  return manifest.segments?.reduce((sum: number, s: { duration?: number }) => sum + (s.duration ?? 0), 0) ?? 0;
 }
 
 function checkAudio(manifest: ParsedManifest): boolean {
@@ -81,9 +72,5 @@ function checkAudio(manifest: ParsedManifest): boolean {
 }
 
 function checkEncrypted(manifest: ParsedManifest): boolean {
-  return (
-    manifest.segments?.some(
-      (s: { key?: { method: string } }) => s.key && s.key.method !== 'NONE',
-    ) ?? false
-  );
+  return manifest.segments?.some((s: { key?: { method: string } }) => s.key && s.key.method !== 'NONE') ?? false;
 }

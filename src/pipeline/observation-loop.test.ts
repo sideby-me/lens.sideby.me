@@ -17,7 +17,7 @@ describe('observation-loop.ts', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
 
-    vi.mocked(intercept.setupInterception).mockImplementation((opts) => {
+    vi.mocked(intercept.setupInterception).mockImplementation(opts => {
       // simulate network events after delay
       setTimeout(() => {
         opts.onCandidate({
@@ -33,7 +33,12 @@ describe('observation-loop.ts', () => {
 
     vi.mocked(domProbe.probeVideoElement).mockResolvedValue({ area: 100000, muted: false });
     vi.mocked(domProbe.clickLargestVideo).mockResolvedValue(true);
-    vi.mocked(manifestParser.fetchAndParseManifest).mockResolvedValue({ isLive: false, duration: 100, hasAudioTrack: true, encrypted: false });
+    vi.mocked(manifestParser.fetchAndParseManifest).mockResolvedValue({
+      isLive: false,
+      duration: 100,
+      hasAudioTrack: true,
+      encrypted: false,
+    });
     vi.mocked(scorer.scoreCandidate).mockReturnValue(100);
     vi.mocked(scorer.filterMutedCandidates).mockImplementation(c => c);
   });
@@ -53,7 +58,7 @@ describe('observation-loop.ts', () => {
     };
 
     const promise = runObservationLoop(opts);
-    
+
     // advance past network event
     await vi.advanceTimersByTimeAsync(2500);
     // advance past min observation
@@ -78,9 +83,9 @@ describe('observation-loop.ts', () => {
     };
 
     const promise = runObservationLoop(opts);
-    
+
     await vi.advanceTimersByTimeAsync(20500); // MAX_OBSERVATION_MS + 500
-    
+
     const result = await promise;
     expect(result.winner).toBeDefined();
   });
@@ -98,9 +103,9 @@ describe('observation-loop.ts', () => {
     };
 
     const promise = runObservationLoop(opts);
-    
+
     await vi.advanceTimersByTimeAsync(4500); // NON_AUTOPLAY_WAIT_MS + 500
-    
+
     expect(domProbe.clickLargestVideo).toHaveBeenCalled();
   });
 
@@ -201,7 +206,7 @@ describe('_buildAlternatives', () => {
       makeScoredCandidate({
         score: 10,
         url: 'https://cdn.example.com/stream.m3u8',
-        headers: { 'Referer': ORIGINAL_REFERER },
+        headers: { Referer: ORIGINAL_REFERER },
       }),
     ];
     const manifests = new Map<string, ManifestInfo | null>();

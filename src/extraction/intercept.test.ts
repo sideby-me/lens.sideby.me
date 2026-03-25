@@ -26,7 +26,7 @@ function mockAbortSignal() {
     reason: undefined,
     dispatchEvent: vi.fn(),
     onabort: null,
-    throwIfAborted: vi.fn()
+    throwIfAborted: vi.fn(),
   } as unknown as AbortSignal;
 }
 

@@ -22,11 +22,7 @@ function isPlaylistUrl(url: string): boolean {
  *   SIG-07: Post-ad sequence  (+25 pts)
  *   SIG-08: HLS playlist URL  (+20 pts — M3U8 index preferred over .ts segment)
  */
-export function scoreCandidate(
-  candidate: Candidate,
-  manifest: ManifestInfo | null,
-  ctx: ScoreContext
-): number {
+export function scoreCandidate(candidate: Candidate, manifest: ManifestInfo | null, ctx: ScoreContext): number {
   let score = 0;
 
   // SIG-01: Area (up to 50 points)

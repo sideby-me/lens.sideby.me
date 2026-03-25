@@ -241,7 +241,12 @@ describe('scoreCandidate', () => {
 
 describe('SIG-08: HLS playlist type', () => {
   it('M3U8 playlist URL with mediaType=hls -> +20 bonus', () => {
-    const c = makeCandidate({ url: 'https://cdn.example.com/stream.m3u8', mediaType: 'hls', area: null, capturedAt: 0 });
+    const c = makeCandidate({
+      url: 'https://cdn.example.com/stream.m3u8',
+      mediaType: 'hls',
+      area: null,
+      capturedAt: 0,
+    });
     const ctx = makeContext({ maxObservedArea: 0, navigationStart: 0 });
     expect(scoreCandidate(c, null, ctx)).toBe(20);
   });

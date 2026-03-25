@@ -24,7 +24,7 @@ describe('dom-probe.ts', () => {
       const page = mockPage([frame1]);
 
       const result = await probeVideoElement(page as any, 'https://example.com/video.mp4');
-      
+
       expect(result).toEqual({ area: 50000, muted: false });
       expect(frame1.evaluate).toHaveBeenCalledTimes(1);
     });
@@ -34,7 +34,7 @@ describe('dom-probe.ts', () => {
       const page = mockPage([frame1]);
 
       const result = await probeVideoElement(page as any, 'https://example.com/video.mp4');
-      
+
       expect(result).toEqual({ area: null, muted: false });
     });
 
@@ -43,19 +43,19 @@ describe('dom-probe.ts', () => {
       const page = mockPage([frame1]);
 
       const result = await probeVideoElement(page as any, 'https://example.com/video.mp4');
-      
+
       expect(result).toEqual({ area: null, muted: false });
       expect(frame1.evaluate).toHaveBeenCalledTimes(1);
     });
-    
+
     it('iterates through multiple frames if earlier ones fail or return null', async () => {
       const frame1 = mockFrame(null, true); // throws
-      const frame2 = mockFrame(null);       // returns null
+      const frame2 = mockFrame(null); // returns null
       const frame3 = mockFrame({ width: 100, height: 100, muted: true }); // succeeds
       const page = mockPage([frame1, frame2, frame3]);
 
       const result = await probeVideoElement(page as any, 'https://example.com/video.mp4');
-      
+
       expect(result).toEqual({ area: 10000, muted: true });
     });
   });
@@ -66,7 +66,7 @@ describe('dom-probe.ts', () => {
       const page = mockPage([frame1]);
 
       const result = await clickLargestVideo(page as any);
-      
+
       expect(result).toBe(true);
       expect(frame1.click).toHaveBeenCalledWith('video[src="foo.mp4"]', { timeout: 3000 });
     });
@@ -76,18 +76,18 @@ describe('dom-probe.ts', () => {
       const page = mockPage([frame1]);
 
       const result = await clickLargestVideo(page as any);
-      
+
       expect(result).toBe(false);
       expect(frame1.click).not.toHaveBeenCalled();
     });
-    
+
     it('handles cross-origin frames gracefully', async () => {
       const frame1 = mockFrame(null, true); // throws
       const frame2 = mockFrame({ selector: 'button.play', area: 1000 }); // succeeds
       const page = mockPage([frame1, frame2]);
 
       const result = await clickLargestVideo(page as any);
-      
+
       expect(result).toBe(true);
       expect(frame1.click).not.toHaveBeenCalled();
       expect(frame2.click).toHaveBeenCalledWith('button.play', { timeout: 3000 });
