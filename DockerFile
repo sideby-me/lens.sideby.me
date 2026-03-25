@@ -1,14 +1,15 @@
 FROM mcr.microsoft.com/playwright:v1.49.0-jammy
 
-WORKDIR /app
-
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci
 
-# Install patchright's chrome (not chromium)
-RUN npx patchright install chrome
+# Install and verify
+RUN npx patchright install chrome && \
+    find /ms-playwright -name "chrome" -type f
 
 COPY . .
 RUN npm run build
