@@ -13,6 +13,7 @@ import { readKV } from './kv.js';
 import { initializeTelemetry } from './telemetry/bootstrap.js';
 import type { CaptureResult, CaptureError } from './types.js';
 import type { Response } from 'express';
+import type { TelemetryCorrelation } from './types.js';
 
 await initializeTelemetry({
   logger: {
@@ -30,6 +31,39 @@ app.use(express.json());
 
 const PORT = Number(process.env.LENS_PORT ?? 4000);
 const SHARED_SECRET = process.env.LENS_SHARED_SECRET ?? '';
+
+function parseTraceparent(traceparent: string | undefined): Pick<TelemetryCorrelation, 'traceId' | 'spanId'> {
+  if (!traceparent) {
+    return {};
+  }
+
+  const trimmed = traceparent.trim();
+  const parts = trimmed.split('-');
+  if (parts.length < 4) {
+    return {};
+  }
+
+  const traceId = parts[1];
+  const spanId = parts[2];
+  if (!traceId || !spanId) {
+    return {};
+  }
+
+  return { traceId, spanId };
+}
+
+function readCorrelation(req: express.Request): TelemetryCorrelation {
+  const traceparent = req.header('traceparent') ?? undefined;
+  const parsedTrace = parseTraceparent(traceparent);
+
+  return {
+    ...parsedTrace,
+    requestId: req.header('x-request-id') ?? undefined,
+    dispatchId: req.header('x-dispatch-id') ?? undefined,
+    roomId: req.header('x-room-id') ?? null,
+    userId: req.header('x-user-id') ?? null,
+  };
+}
 
 // Auth middleware
 function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction): void {
@@ -143,10 +177,11 @@ app.post('/capture', authMiddleware, async (req, res) => {
 
   // Enqueue capture job
   const uuid = uuidv4();
+  const correlation = readCorrelation(req);
   writeEvent(res, 'status', { status: 'queued', uuid });
 
   try {
-    const job = await queue.add('capture', { url, uuid }, { jobId: uuid });
+    const job = await queue.add('capture', { url, uuid, correlation }, { jobId: uuid });
     activeStreams.set(job.id!, res);
 
     writeEvent(res, 'status', { status: 'processing' });

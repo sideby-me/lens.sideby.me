@@ -3,9 +3,40 @@ import { v4 as uuidv4 } from 'uuid';
 import { runObservationLoop } from './pipeline/observation-loop.js';
 import { putKV } from './kv.js';
 import { dedupSet } from './dedup.js';
-import type { CaptureResult, LensPayload } from './types.js';
+import { buildCorrelationFields, redactTelemetryPayload } from './redaction.js';
+import type { CaptureResult, LensPayload, TelemetryCorrelation } from './types.js';
 
 const CAPTURE_TIMEOUT_MS = 30_000;
+
+export function buildCaptureTelemetryPayload(
+  event: string,
+  correlation: TelemetryCorrelation = {},
+  payload: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return redactTelemetryPayload({
+    event,
+    ...buildCorrelationFields(correlation),
+    ...payload,
+  });
+}
+
+function logCaptureTelemetry(
+  level: 'info' | 'warn' | 'error',
+  event: string,
+  correlation: TelemetryCorrelation = {},
+  payload: Record<string, unknown> = {}
+): void {
+  const line = JSON.stringify(buildCaptureTelemetryPayload(event, correlation, payload));
+  if (level === 'error') {
+    console.error('[lens:telemetry]', line);
+    return;
+  }
+  if (level === 'warn') {
+    console.warn('[lens:telemetry]', line);
+    return;
+  }
+  console.log('[lens:telemetry]', line);
+}
 
 // Detect token expiry from URL query parameters
 function detectExpiry(url: string): number | null {
@@ -42,9 +73,13 @@ function detectExpiry(url: string): number | null {
 }
 
 // Capture media URL + headers from the given page URL, with a timeout and ad filtering
-export async function capture(url: string): Promise<CaptureResult> {
+export async function capture(url: string, correlation: TelemetryCorrelation = {}): Promise<CaptureResult> {
   const uuid = uuidv4();
   const abortController = new AbortController();
+
+  logCaptureTelemetry('info', 'capture_started', correlation, {
+    url,
+  });
 
   // Hard abort at CAPTURE_TIMEOUT_MS
   const timeout = setTimeout(() => abortController.abort(), CAPTURE_TIMEOUT_MS);
@@ -180,8 +215,20 @@ export async function capture(url: string): Promise<CaptureResult> {
     // Record dedup mapping
     await dedupSet(url, uuid);
 
+    logCaptureTelemetry('info', 'capture_completed', correlation, {
+      uuid,
+      mediaType: payload.mediaType,
+      lowConfidence: payload.lowConfidence,
+      ambiguous: payload.ambiguous,
+    });
+
     return { uuid, payload };
   } catch (error) {
+    logCaptureTelemetry('error', 'capture_failed', correlation, {
+      code: error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : 'browser-launch-failed',
+      message: error instanceof Error ? error.message : String(error),
+    });
+
     // Re-throw with capture error shape if not already
     if (error && typeof error === 'object' && 'code' in error) {
       throw error;
