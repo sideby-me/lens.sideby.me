@@ -10,8 +10,20 @@ import { createQueue, startWorker, createQueueEvents } from './queue.js';
 import { writeEvent, closeSSE } from './sse.js';
 import { dedupCheck, dedupDelete } from './dedup.js';
 import { readKV } from './kv.js';
+import { initializeTelemetry } from './telemetry/bootstrap.js';
 import type { CaptureResult, CaptureError } from './types.js';
 import type { Response } from 'express';
+
+await initializeTelemetry({
+  logger: {
+    warn: (message, meta) => {
+      console.warn('[lens]', message, meta ?? {});
+    },
+    info: (message, meta) => {
+      console.log('[lens]', message, meta ?? {});
+    },
+  },
+});
 
 const app = express();
 app.use(express.json());
