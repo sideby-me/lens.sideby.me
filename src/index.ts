@@ -10,6 +10,7 @@ import { createQueue, startWorker, createQueueEvents } from './queue.js';
 import { writeEvent, closeSSE } from './sse.js';
 import { dedupCheck, dedupDelete } from './dedup.js';
 import { readKV } from './kv.js';
+import { storeUuidCorrelation } from './uuid-bridge.js';
 import { initializeTelemetry } from './telemetry/bootstrap.js';
 import type { CaptureResult, CaptureError } from './types.js';
 import type { Response } from 'express';
@@ -85,7 +86,7 @@ const activeStreams = new Map<string, Response>();
 // Queue setup
 const queue = createQueue();
 
-const worker = startWorker({
+const _worker = startWorker({
   onCompleted: (jobId: string, result: CaptureResult) => {
     const res = activeStreams.get(jobId);
     if (!res) return;
@@ -182,6 +183,20 @@ app.post('/capture', authMiddleware, async (req, res) => {
 
   try {
     const job = await queue.add('capture', { url, uuid, correlation }, { jobId: uuid });
+
+    try {
+      await storeUuidCorrelation(uuid, {
+        ...correlation,
+        traceparent: req.header('traceparent') ?? undefined,
+        baggage: req.header('baggage') ?? undefined,
+      });
+    } catch (bridgeErr) {
+      console.warn('[lens] UUID correlation bridge store failed', {
+        uuid,
+        err: bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr),
+      });
+    }
+
     activeStreams.set(job.id!, res);
 
     writeEvent(res, 'status', { status: 'processing' });
@@ -243,3 +258,4 @@ app.post('/relay/fetch', authMiddleware, async (req, res) => {
 app.listen(PORT, () => {
   console.log(`[lens] Server listening on port ${PORT}`);
 });
+
