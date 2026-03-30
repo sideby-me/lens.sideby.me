@@ -35,6 +35,8 @@ export function buildQueueCorrelation(
   };
 }
 
+export const injectQueueCorrelation = buildQueueCorrelation;
+
 /**
  * Extract correlation from queue job data.
  */

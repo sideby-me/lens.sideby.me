@@ -1,5 +1,6 @@
 import { chromium } from 'patchright';
 import { v4 as uuidv4 } from 'uuid';
+import { context, trace } from '@opentelemetry/api';
 import { runObservationLoop } from './pipeline/observation-loop.js';
 import { putKV } from './kv.js';
 import { dedupSet } from './dedup.js';
@@ -7,6 +8,19 @@ import { buildCorrelationFields, redactTelemetryPayload } from './redaction.js';
 import type { CaptureResult, LensPayload, TelemetryCorrelation } from './types.js';
 
 const CAPTURE_TIMEOUT_MS = 30_000;
+
+export function applyActiveSpanCorrelation(correlation: TelemetryCorrelation = {}): TelemetryCorrelation {
+  const activeSpanContext = trace.getSpan(context.active())?.spanContext();
+  if (!activeSpanContext) {
+    return correlation;
+  }
+
+  return {
+    ...correlation,
+    traceId: activeSpanContext.traceId || correlation.traceId,
+    spanId: activeSpanContext.spanId || correlation.spanId,
+  };
+}
 
 export function buildCaptureTelemetryPayload(
   event: string,
@@ -74,10 +88,11 @@ function detectExpiry(url: string): number | null {
 
 // Capture media URL + headers from the given page URL, with a timeout and ad filtering
 export async function capture(url: string, correlation: TelemetryCorrelation = {}): Promise<CaptureResult> {
+  const runtimeCorrelation = applyActiveSpanCorrelation(correlation);
   const uuid = uuidv4();
   const abortController = new AbortController();
 
-  logCaptureTelemetry('info', 'capture_started', correlation, {
+  logCaptureTelemetry('info', 'capture_started', runtimeCorrelation, {
     url,
   });
 
@@ -118,7 +133,8 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     // patchright handles webdriver/plugins - only these remain:
     await context.addInitScript(() => {
       // patchright does NOT cover window.chrome
-      (window as any).chrome = { runtime: {} };
+      const windowWithChrome = window as unknown as { chrome?: { runtime: Record<string, unknown> } };
+      windowWithChrome.chrome = { runtime: {} };
 
       // Spoof userAgentData to match the chosen UA string
       Object.defineProperty(navigator, 'userAgentData', {
@@ -215,7 +231,7 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     // Record dedup mapping
     await dedupSet(url, uuid);
 
-    logCaptureTelemetry('info', 'capture_completed', correlation, {
+    logCaptureTelemetry('info', 'capture_completed', runtimeCorrelation, {
       uuid,
       mediaType: payload.mediaType,
       lowConfidence: payload.lowConfidence,
@@ -224,7 +240,7 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
 
     return { uuid, payload };
   } catch (error) {
-    logCaptureTelemetry('error', 'capture_failed', correlation, {
+    logCaptureTelemetry('error', 'capture_failed', runtimeCorrelation, {
       code: error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : 'browser-launch-failed',
       message: error instanceof Error ? error.message : String(error),
     });
@@ -242,3 +258,4 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     await browser?.close().catch(() => {});
   }
 }
+
