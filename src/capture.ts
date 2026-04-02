@@ -5,6 +5,7 @@ import { runObservationLoop } from './pipeline/observation-loop.js';
 import { putKV } from './kv.js';
 import { dedupSet } from './dedup.js';
 import { buildCorrelationFields, redactTelemetryPayload } from './redaction.js';
+import { recordCaptureStart, recordCaptureOutcome, recordCaptureError } from './telemetry/metrics.js';
 import type { CaptureResult, LensPayload, TelemetryCorrelation } from './types.js';
 
 const CAPTURE_TIMEOUT_MS = 30_000;
@@ -88,6 +89,7 @@ function detectExpiry(url: string): number | null {
 
 // Capture media URL + headers from the given page URL, with a timeout and ad filtering
 export async function capture(url: string, correlation: TelemetryCorrelation = {}): Promise<CaptureResult> {
+  const captureStartTime = Date.now();
   const runtimeCorrelation = applyActiveSpanCorrelation(correlation);
   const uuid = uuidv4();
   const abortController = new AbortController();
@@ -238,8 +240,30 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
       ambiguous: payload.ambiguous,
     });
 
+    // Record golden signal metrics
+    const mediaType = result.winner.mediaType;
+    const stopTimer = recordCaptureStart(mediaType);
+    const latency = Date.now() - captureStartTime;
+    stopTimer();
+    recordCaptureOutcome(mediaType, 'success');
+
     return { uuid, payload };
   } catch (error) {
+    const latency = Date.now() - captureStartTime;
+    
+    // Categorize error type for metrics
+    let errorType: 'capture-failure' | 'timeout' | 'network-error' | 'manifest-error' = 'capture-failure';
+    if (error && typeof error === 'object' && 'code' in error) {
+      const errorCode = (error as { code: string }).code;
+      if (errorCode === 'timeout') {
+        errorType = 'timeout';
+      } else if (errorCode === 'browser-launch-failed') {
+        errorType = 'network-error';
+      }
+    }
+    
+    recordCaptureError('other', errorType);
+    
     logCaptureTelemetry('error', 'capture_failed', runtimeCorrelation, {
       code: error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : 'browser-launch-failed',
       message: error instanceof Error ? error.message : String(error),
