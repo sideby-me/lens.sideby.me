@@ -4,10 +4,18 @@ import { context, propagation, trace, type Context } from '@opentelemetry/api';
 import { capture } from './capture.js';
 import { buildCorrelationFields, redactTelemetryPayload } from './redaction.js';
 import { buildQueueCorrelation, extractQueueCorrelation } from './telemetry/queue-correlation.js';
+import { createQueueMetrics, startQueueMetricsPolling } from './queue-metrics.js';
 import type { CaptureResult, LensJob, CaptureError, TelemetryCorrelation } from './types.js';
 import type { QueueCorrelationPayload } from './telemetry/queue-correlation.js';
 
 const QUEUE_NAME = 'lens-capture';
+const QUEUE_METRICS_INTERVAL_MS = 15000;
+
+// Initialize queue metrics once
+createQueueMetrics();
+
+// Store stop function for graceful shutdown
+let queueMetricsStop: (() => void) | null = null;
 
 let connection: Redis | null = null;
 
@@ -135,9 +143,24 @@ function getConnection(): Redis {
 
 // Create the BullMQ queue for capture jobs
 export function createQueue(): Queue<LensJob> {
-  return new Queue<LensJob>(QUEUE_NAME, {
+  const queue = new Queue<LensJob>(QUEUE_NAME, {
     connection: getConnection(),
   });
+
+  // Start queue metrics polling
+  queueMetricsStop = startQueueMetricsPolling(queue, QUEUE_NAME, QUEUE_METRICS_INTERVAL_MS);
+  console.log(`[lens] Queue metrics polling started for ${QUEUE_NAME}`);
+
+  return queue;
+}
+
+// Stop queue metrics polling (for graceful shutdown)
+export function stopQueueMetrics(): void {
+  if (queueMetricsStop) {
+    queueMetricsStop();
+    queueMetricsStop = null;
+    console.log('[lens] Queue metrics polling stopped');
+  }
 }
 
 /** Job event callback types */
