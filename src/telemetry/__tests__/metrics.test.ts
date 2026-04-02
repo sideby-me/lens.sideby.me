@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { metrics } from '@opentelemetry/api';
+import { metrics, Counter, Histogram } from '@opentelemetry/api';
 
 describe('capture metrics', () => {
   let mockMeter: ReturnType<typeof metrics.getMeter>;
-  let mockCounters: Map<string, ReturnType<typeof mockMeter.createCounter>>;
-  let mockHistograms: Map<string, ReturnType<typeof mockMeter.createHistogram>>;
+  let mockCounters: Map<string, Counter>;
+  let mockHistograms: Map<string, Histogram>;
 
   beforeEach(() => {
     mockCounters = new Map();
@@ -13,14 +13,14 @@ describe('capture metrics', () => {
       createCounter: vi.fn((name: string) => {
         const counter = {
           add: vi.fn(),
-        };
+        } as unknown as Counter;
         mockCounters.set(name, counter);
         return counter;
       }),
       createHistogram: vi.fn((name: string) => {
         const histogram = {
           record: vi.fn(),
-        };
+        } as unknown as Histogram;
         mockHistograms.set(name, histogram);
         return histogram;
       }),
@@ -105,9 +105,12 @@ describe('capture metrics', () => {
       createCaptureMetrics();
 
       // Make the histogram throw
-      mockHistograms.get('capture_latency_ms')!.record.mockImplementation(() => {
-        throw new Error('metrics backend unavailable');
-      });
+      const histogram = mockHistograms.get('capture_latency_ms');
+      if (histogram) {
+        (histogram as unknown as { record: ReturnType<typeof vi.fn> }).record.mockImplementation(() => {
+          throw new Error('metrics backend unavailable');
+        });
+      }
 
       const stopTimer = recordCaptureStart('hls');
 
@@ -149,9 +152,12 @@ describe('capture metrics', () => {
       const { createCaptureMetrics, recordCaptureOutcome } = await import('../metrics.js');
       createCaptureMetrics();
 
-      mockCounters.get('capture_requests_total')!.add.mockImplementation(() => {
-        throw new Error('metrics backend unavailable');
-      });
+      const counter = mockCounters.get('capture_requests_total');
+      if (counter) {
+        (counter as unknown as { add: ReturnType<typeof vi.fn> }).add.mockImplementation(() => {
+          throw new Error('metrics backend unavailable');
+        });
+      }
 
       expect(() => recordCaptureOutcome('hls', 'success')).not.toThrow();
     });
@@ -175,7 +181,7 @@ describe('capture metrics', () => {
       createCaptureMetrics();
 
       // Test all valid error_type values
-      const errorTypes = ['capture-failure', 'timeout', 'network-error', 'manifest-error'];
+      const errorTypes: Array<'capture-failure' | 'timeout' | 'network-error' | 'manifest-error'> = ['capture-failure', 'timeout', 'network-error', 'manifest-error'];
 
       for (const errorType of errorTypes) {
         recordCaptureError('hls', errorType);
@@ -190,9 +196,12 @@ describe('capture metrics', () => {
       const { createCaptureMetrics, recordCaptureError } = await import('../metrics.js');
       createCaptureMetrics();
 
-      mockCounters.get('capture_errors_total')!.add.mockImplementation(() => {
-        throw new Error('metrics backend unavailable');
-      });
+      const counter = mockCounters.get('capture_errors_total');
+      if (counter) {
+        (counter as unknown as { add: ReturnType<typeof vi.fn> }).add.mockImplementation(() => {
+          throw new Error('metrics backend unavailable');
+        });
+      }
 
       expect(() => recordCaptureError('hls', 'capture-failure')).not.toThrow();
     });

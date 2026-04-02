@@ -7,16 +7,16 @@
  * All metric calls are wrapped in try/catch for fail-open behavior.
  */
 
-import { metrics } from '@opentelemetry/api';
+import { metrics, Counter, Histogram } from '@opentelemetry/api';
 
 type CaptureOutcome = 'success' | 'failure' | 'timeout';
 type CaptureErrorType = 'capture-failure' | 'timeout' | 'network-error' | 'manifest-error';
 type CaptureMediaType = 'hls' | 'dash' | 'mp4' | 'other';
 
 interface CaptureMetrics {
-  requestsTotal: ReturnType<typeof metrics.getMeter>['createCounter'] extends () => infer R ? R : never;
-  latencyMs: ReturnType<typeof metrics.getMeter>['createHistogram'] extends () => infer R ? R : never;
-  errorsTotal: ReturnType<typeof metrics.getMeter>['createCounter'] extends () => infer R ? R : never;
+  requestsTotal: Counter;
+  latencyMs: Histogram;
+  errorsTotal: Counter;
 }
 
 let captureMetrics: CaptureMetrics | null = null;
