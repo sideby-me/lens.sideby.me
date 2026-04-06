@@ -69,15 +69,15 @@ describe('queue metrics', () => {
       );
     });
 
-    it('should create queue_wait_age_ms gauge with label queue_name', async () => {
+    it('should create queue_wait_age_seconds gauge with label queue_name', async () => {
       const { createQueueMetrics } = await import('../queue-metrics.js');
       createQueueMetrics();
 
       expect(mockMeter.createObservableGauge).toHaveBeenCalledWith(
-        'queue_wait_age_ms',
+        'queue_wait_age_seconds',
         expect.objectContaining({
           description: expect.any(String),
-          unit: 'ms',
+          unit: 's',
         })
       );
     });

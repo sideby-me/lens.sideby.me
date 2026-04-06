@@ -47,9 +47,9 @@ export function createQueueMetrics(): void {
     unit: '{job}',
   });
 
-  waitAgeGauge = meter.createObservableGauge('queue_wait_age_ms', {
-    description: 'Age of oldest waiting job in milliseconds',
-    unit: 'ms',
+  waitAgeGauge = meter.createObservableGauge('queue_wait_age_seconds', {
+    description: 'Age of oldest waiting job in seconds',
+    unit: 's',
   });
 
   // Register observable callbacks
@@ -96,7 +96,7 @@ export async function updateQueueMetrics(queue: Queue, queueName: string): Promi
     const waitingJobs = await queue.getWaiting(0, 1);
     if (waitingJobs.length > 0 && waitingJobs[0]?.timestamp) {
       const age = Date.now() - waitingJobs[0].timestamp;
-      metricValues.waitAge.set(queueName, Math.max(0, age));
+      metricValues.waitAge.set(queueName, Math.max(0, age / 1000));
     } else {
       metricValues.waitAge.set(queueName, 0);
     }
