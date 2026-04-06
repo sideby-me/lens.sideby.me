@@ -73,16 +73,19 @@ export async function initializeTelemetry(options: InitializeTelemetryOptions = 
 
   try {
     const headers = parseOtelHeaders(env.OTEL_EXPORTER_OTLP_HEADERS);
+    const traceUrl = `${endpoint}/v1/traces`;
+    const metricUrl = `${endpoint}/v1/metrics`;
+    const logUrl = `${endpoint}/v1/logs`;
 
     const sdk = new NodeSDK({
       resource: resourceFromAttributes(resolveTelemetryResourceAttributes(env)),
       traceExporter: new OTLPTraceExporter({
-        url: `${endpoint}/v1/traces`,
+        url: traceUrl,
         headers,
       }),
       metricReader: new PeriodicExportingMetricReader({
         exporter: new OTLPMetricExporter({
-          url: `${endpoint}/v1/metrics`,
+          url: metricUrl,
           headers,
         }),
       }),
@@ -91,6 +94,12 @@ export async function initializeTelemetry(options: InitializeTelemetryOptions = 
 
     const starter = options.sdkFactory ?? (async (instance: NodeSDK) => instance.start());
     await starter(sdk);
+
+    logger.info?.('lens telemetry bootstrap initialized', {
+      traceUrl,
+      metricUrl,
+      logUrl,
+    });
   } catch (error) {
     logger.warn('lens telemetry bootstrap failed; continuing without exporter', {
       error: error instanceof Error ? error.message : String(error),

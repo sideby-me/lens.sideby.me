@@ -128,7 +128,7 @@ export function setupInterception(opts: InterceptionOptions): () => void {
   }
 
   // Response handler: inspect content-type for media classification
-  async function responseHandler(response: { url(): string; headers(): Record<string, string>; frame(): any }) {
+  async function responseHandler(response: { url(): string; headers(): Record<string, string>; frame(): { url(): string } | null | undefined }) {
     const url = response.url();
     const contentType = response.headers()['content-type'] ?? '';
 
@@ -163,3 +163,4 @@ export function setupInterception(opts: InterceptionOptions): () => void {
 
   return cleanup;
 }
+

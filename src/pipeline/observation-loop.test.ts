@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BrowserContext, Page } from 'patchright';
 import { runObservationLoop, _buildAlternatives } from './observation-loop.js';
 import * as intercept from '../extraction/intercept.js';
 import * as domProbe from '../extraction/dom-probe.js';
 import * as manifestParser from '../scoring/manifest-parser.js';
-import * as selectWinnerMod from '../scoring/select-winner.js';
 import * as scorer from '../scoring/scorer.js';
 import type { ScoredCandidate, ManifestInfo } from '../scoring/types.js';
 
@@ -50,8 +50,8 @@ describe('observation-loop.ts', () => {
   it('resolves early if top candidate exceeds early stop threshold and min observation elapsed', async () => {
     const abortSignal = new AbortController().signal;
     const opts = {
-      context: {} as any,
-      page: { frames: () => [] } as any,
+      context: {} as unknown as BrowserContext,
+      page: { frames: () => [] } as unknown as Page,
       abortSignal,
       navigationStart: Date.now(),
       pageUrl: 'https://example.com/watch',
@@ -75,8 +75,8 @@ describe('observation-loop.ts', () => {
     // Or just run and expect it to resolve at max timeout.
     const abortSignal = new AbortController().signal;
     const opts = {
-      context: {} as any,
-      page: { frames: () => [] } as any,
+      context: {} as unknown as BrowserContext,
+      page: { frames: () => [] } as unknown as Page,
       abortSignal,
       navigationStart: Date.now(),
       pageUrl: 'https://example.com/watch',
@@ -95,14 +95,14 @@ describe('observation-loop.ts', () => {
 
     const abortSignal = new AbortController().signal;
     const opts = {
-      context: {} as any,
-      page: { frames: () => [] } as any,
+      context: {} as unknown as BrowserContext,
+      page: { frames: () => [] } as unknown as Page,
       abortSignal,
       navigationStart: Date.now(),
       pageUrl: 'https://example.com/watch',
     };
 
-    const promise = runObservationLoop(opts);
+    const _promise = runObservationLoop(opts);
 
     await vi.advanceTimersByTimeAsync(4500); // NON_AUTOPLAY_WAIT_MS + 500
 
@@ -114,8 +114,8 @@ describe('observation-loop.ts', () => {
 
     const abortSignal = new AbortController().signal;
     const opts = {
-      context: {} as any,
-      page: { frames: () => [] } as any,
+      context: {} as unknown as BrowserContext,
+      page: { frames: () => [] } as unknown as Page,
       abortSignal,
       navigationStart: Date.now(),
       pageUrl: 'https://example.com/watch',
@@ -231,3 +231,7 @@ describe('_buildAlternatives', () => {
     expect(result).toEqual([]);
   });
 });
+
+
+
+
