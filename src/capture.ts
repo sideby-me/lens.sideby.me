@@ -5,7 +5,8 @@ import { runObservationLoop } from './pipeline/observation-loop.js';
 import { putKV } from './kv.js';
 import { dedupSet } from './dedup.js';
 import { buildCorrelationFields, redactTelemetryPayload } from './redaction.js';
-import { recordCaptureStart, recordCaptureOutcome, recordCaptureError } from './telemetry/metrics.js';
+import { logError, logInfo, logWarn } from './telemetry/logs.js';
+import { recordCaptureLatency, recordCaptureOutcome, recordCaptureError } from './telemetry/metrics.js';
 import type { CaptureResult, LensPayload, TelemetryCorrelation } from './types.js';
 
 const CAPTURE_TIMEOUT_MS = 30_000;
@@ -43,14 +44,14 @@ function logCaptureTelemetry(
 ): void {
   const line = JSON.stringify(buildCaptureTelemetryPayload(event, correlation, payload));
   if (level === 'error') {
-    console.error('[lens:telemetry]', line);
+    logError(line);
     return;
   }
   if (level === 'warn') {
-    console.warn('[lens:telemetry]', line);
+    logWarn(line);
     return;
   }
-  console.log('[lens:telemetry]', line);
+  logInfo(line);
 }
 
 // Detect token expiry from URL query parameters
@@ -184,14 +185,23 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
       pageUrl: url, // used for Referer injection on alternatives
     });
 
-    console.info(
-      `[lens] Captured ${result.winner.url} (score: ${result.winner.score}, runner-up: ${result.runnerUpScore ?? 'none'}, candidates: ${result.candidateCount})`
-    );
+    logInfo('Captured media candidate', {
+      domain: 'capture',
+      event: 'capture_winner_selected',
+      url: result.winner.url,
+      score: result.winner.score,
+      runnerUpScore: result.runnerUpScore ?? null,
+      candidateCount: result.candidateCount,
+    });
 
     if (result.lowConfidence) {
-      console.warn(
-        `[lens] Low confidence capture for ${url} — best score: ${result.winner.score}, candidates: ${result.candidateCount}`
-      );
+      logWarn('Low confidence capture result', {
+        domain: 'capture',
+        event: 'capture_low_confidence',
+        url,
+        bestScore: result.winner.score,
+        candidateCount: result.candidateCount,
+      });
     }
 
     // Detect IP-bound token: some CDNs embed the capture IP in the path and reject
@@ -242,9 +252,8 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
 
     // Record golden signal metrics
     const mediaType = result.winner.mediaType;
-    const stopTimer = recordCaptureStart(mediaType);
     const latency = Date.now() - captureStartTime;
-    stopTimer();
+    recordCaptureLatency(mediaType, 'success', latency);
     recordCaptureOutcome(mediaType, 'success');
 
     return { uuid, payload };
@@ -261,12 +270,17 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
         errorType = 'network-error';
       }
     }
-    
+
+    recordCaptureLatency('other', 'failure', latency);
+    recordCaptureOutcome('other', 'failure');
     recordCaptureError('other', errorType);
-    
+
     logCaptureTelemetry('error', 'capture_failed', runtimeCorrelation, {
       code: error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : 'browser-launch-failed',
       message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      errorType,
+      latencyMs: latency,
     });
 
     // Re-throw with capture error shape if not already

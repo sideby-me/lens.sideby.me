@@ -7,14 +7,24 @@ import { buildCorrelationFields, redactTelemetryPayload } from '../redaction.js'
 describe('lens telemetry bootstrap contract', () => {
   it('exposes required resource attributes', () => {
     const attributes = resolveTelemetryResourceAttributes({
-      NODE_ENV: 'test',
+      DEPLOYMENT_ENVIRONMENT: 'staging',
+      NODE_ENV: 'production',
       npm_package_version: '1.2.3',
       OTEL_SERVICE_NAME: 'lens-test',
     });
 
     expect(attributes['service.name']).toBe('lens-test');
     expect(attributes['service.version']).toBe('1.2.3');
-    expect(attributes['deployment.environment']).toBe('test');
+    expect(attributes['deployment.environment']).toBe('staging');
+  });
+
+  it('normalizes unsupported environments to development', () => {
+    const attributes = resolveTelemetryResourceAttributes({
+      DEPLOYMENT_ENVIRONMENT: 'sandbox',
+      NODE_ENV: 'sandbox',
+    });
+
+    expect(attributes['deployment.environment']).toBe('development');
   });
 
   it('keeps runtime fail-open when exporter initialization fails', async () => {

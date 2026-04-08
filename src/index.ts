@@ -12,6 +12,7 @@ import { dedupCheck, dedupDelete } from './dedup.js';
 import { readKV } from './kv.js';
 import { storeUuidCorrelation } from './uuid-bridge.js';
 import { initializeTelemetry } from './telemetry/bootstrap.js';
+import { logInfo, logWarn } from './telemetry/logs.js';
 import type { CaptureResult, CaptureError } from './types.js';
 import type { Response } from 'express';
 import type { TelemetryCorrelation } from './types.js';
@@ -19,10 +20,18 @@ import type { TelemetryCorrelation } from './types.js';
 await initializeTelemetry({
   logger: {
     warn: (message, meta) => {
-      console.warn('[lens]', message, meta ?? {});
+      logWarn(message, {
+        domain: 'other',
+        event: 'telemetry_bootstrap',
+        ...(meta ?? {}),
+      });
     },
     info: (message, meta) => {
-      console.log('[lens]', message, meta ?? {});
+      logInfo(message, {
+        domain: 'other',
+        event: 'telemetry_bootstrap',
+        ...(meta ?? {}),
+      });
     },
   },
 });
@@ -173,7 +182,11 @@ app.post('/capture', authMiddleware, async (req, res) => {
       await dedupDelete(url);
     }
   } catch (err) {
-    console.warn('[lens] Dedup check failed, proceeding with capture:', err);
+    logWarn('Dedup check failed, proceeding with capture', {
+      domain: 'other',
+      event: 'dedup_check_failed',
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // Enqueue capture job
@@ -191,7 +204,9 @@ app.post('/capture', authMiddleware, async (req, res) => {
         baggage: req.header('baggage') ?? undefined,
       });
     } catch (bridgeErr) {
-      console.warn('[lens] UUID correlation bridge store failed', {
+      logWarn('UUID correlation bridge store failed', {
+        domain: 'other',
+        event: 'uuid_correlation_bridge_store_failed',
         uuid,
         err: bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr),
       });
@@ -256,6 +271,10 @@ app.post('/relay/fetch', authMiddleware, async (req, res) => {
 
 // Start the server
 app.listen(PORT, () => {
-  console.log(`[lens] Server listening on port ${PORT}`);
+  logInfo('Server listening on port', {
+    domain: 'other',
+    event: 'server_start',
+    port: PORT,
+  });
 });
 

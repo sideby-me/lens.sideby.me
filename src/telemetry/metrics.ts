@@ -106,6 +106,26 @@ export function recordCaptureOutcome(
 }
 
 /**
+ * Records capture latency with explicit media type and outcome labels.
+ */
+export function recordCaptureLatency(
+  mediaType: CaptureMediaType,
+  outcome: CaptureOutcome,
+  durationMs: number
+): void {
+  const metricsInstance = createCaptureMetrics();
+
+  try {
+    metricsInstance.latencyMs.record(durationMs, {
+      media_type: mediaType,
+      outcome,
+    });
+  } catch {
+    // Fail-open: metric recording errors must not affect capture behavior
+  }
+}
+
+/**
  * Records a capture error.
  *
  * @param mediaType - The media type being captured

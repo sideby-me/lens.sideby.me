@@ -1,3 +1,5 @@
+import { logWarn } from './telemetry/logs.js';
+
 export interface TelemetryCorrelationInput {
   traceId?: string;
   spanId?: string;
@@ -66,7 +68,7 @@ export function redactTelemetryPayload(input: Record<string, unknown>): Record<s
 
 export function buildCorrelationFields(
   correlation: TelemetryCorrelationInput,
-  warn: WarnFn = message => console.warn('[lens]', message)
+  warn: WarnFn = message => logWarn(message, { domain: 'other', event: 'correlation_missing_non_core_ids' })
 ): TelemetryCorrelationFields {
   const fields: TelemetryCorrelationFields = {
     trace_id: correlation.traceId ?? null,

@@ -1,5 +1,6 @@
 import { metrics, type ObservableResult } from '@opentelemetry/api';
 import type { Queue } from 'bullmq';
+import { logWarn } from './telemetry/logs.js';
 
 const meter = metrics.getMeter('lens.sideby.me', '1.0.0');
 
@@ -102,7 +103,9 @@ export async function updateQueueMetrics(queue: Queue, queueName: string): Promi
     }
   } catch (err) {
     // Fail-open: log warning but do not propagate error (D-17)
-    console.warn('[lens:queue-metrics] Failed to update queue metrics', {
+    logWarn('Failed to update queue metrics', {
+      domain: 'queue',
+      event: 'queue_metrics_update_failed',
       queueName,
       error: err instanceof Error ? err.message : String(err),
     });

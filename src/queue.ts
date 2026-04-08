@@ -1,9 +1,10 @@
 import { Queue, Worker, QueueEvents, type Job } from 'bullmq';
 import { Redis } from 'ioredis';
-import { context, propagation, trace, type Context } from '@opentelemetry/api';
+import { context, propagation, trace, type Context, type Span } from '@opentelemetry/api';
 import { capture } from './capture.js';
 import { buildCorrelationFields, redactTelemetryPayload } from './redaction.js';
 import { buildQueueCorrelation, extractQueueCorrelation } from './telemetry/queue-correlation.js';
+import { logError, logInfo, logWarn } from './telemetry/logs.js';
 import { createQueueMetrics, startQueueMetricsPolling } from './queue-metrics.js';
 import type { CaptureResult, LensJob, CaptureError, TelemetryCorrelation } from './types.js';
 import type { QueueCorrelationPayload } from './telemetry/queue-correlation.js';
@@ -149,7 +150,11 @@ export function createQueue(): Queue<LensJob> {
 
   // Start queue metrics polling
   queueMetricsStop = startQueueMetricsPolling(queue, QUEUE_NAME, QUEUE_METRICS_INTERVAL_MS);
-  console.log(`[lens] Queue metrics polling started for ${QUEUE_NAME}`);
+  logInfo('Queue metrics polling started', {
+    domain: 'queue',
+    event: 'queue_metrics_poll_start',
+    queue: QUEUE_NAME,
+  });
 
   return queue;
 }
@@ -159,7 +164,11 @@ export function stopQueueMetrics(): void {
   if (queueMetricsStop) {
     queueMetricsStop();
     queueMetricsStop = null;
-    console.log('[lens] Queue metrics polling stopped');
+    logInfo('Queue metrics polling stopped', {
+      domain: 'queue',
+      event: 'queue_metrics_poll_stop',
+      queue: QUEUE_NAME,
+    });
   }
 }
 
@@ -189,14 +198,14 @@ function logQueueTelemetry(
 ): void {
   const line = JSON.stringify(buildQueueTelemetryPayload(event, correlation, payload));
   if (level === 'error') {
-    console.error('[lens:telemetry]', line);
+    logError(line);
     return;
   }
   if (level === 'warn') {
-    console.warn('[lens:telemetry]', line);
+    logWarn(line);
     return;
   }
-  console.log('[lens:telemetry]', line);
+  logInfo(line);
 }
 
 // Start the BullMQ worker that processes capture jobs
@@ -214,9 +223,14 @@ export function startWorker(callbacks: QueueCallbacks): Worker<LensJob, CaptureR
       logQueueTelemetry('info', 'queue_job_started', workerCorrelation, {
         jobId: job.id ?? null,
       });
-      console.log(`[lens] Processing job ${job.id} for ${job.data.url}`);
+      logInfo('Processing queue job', {
+        domain: 'queue',
+        event: 'queue_job_processing',
+        jobId: job.id ?? null,
+        url: job.data.url,
+      });
       try {
-        return await context.with(trace.setSpan(lineage.parentContext, childSpan), () =>
+        return await context.with(trace.setSpan(lineage.parentContext, childSpan as Span), () =>
           capture(job.data.url, workerCorrelation)
         );
       } finally {
@@ -235,7 +249,12 @@ export function startWorker(callbacks: QueueCallbacks): Worker<LensJob, CaptureR
         jobId: job.id,
         uuid: result.uuid,
       });
-      console.log(`[lens] Job ${job.id} completed: uuid=${result.uuid}`);
+      logInfo('Queue job completed', {
+        domain: 'queue',
+        event: 'queue_job_completed',
+        jobId: job.id,
+        uuid: result.uuid,
+      });
       callbacks.onCompleted(job.id, result);
     }
   });
@@ -249,13 +268,24 @@ export function startWorker(callbacks: QueueCallbacks): Worker<LensJob, CaptureR
       logQueueTelemetry('error', 'queue_job_failed', job.data.correlation, {
         jobId: job.id,
         code: captureErr.code,
+        message: captureErr.message,
       });
-      console.error(`[lens] Job ${job.id} failed:`, captureErr);
+      logError('Queue job failed', {
+        domain: 'queue',
+        event: 'queue_job_failed',
+        jobId: job.id,
+        code: captureErr.code,
+        message: captureErr.message,
+      });
       callbacks.onFailed(job.id, captureErr);
     }
   });
 
-  console.log(`[lens] Worker started with concurrency=${concurrency}`);
+  logInfo('Queue worker started', {
+    domain: 'queue',
+    event: 'queue_worker_started',
+    concurrency,
+  });
   return worker;
 }
 
@@ -264,11 +294,20 @@ export function createQueueEvents(): QueueEvents {
   const events = new QueueEvents(QUEUE_NAME, { connection: getConnection() });
 
   events.on('completed', ({ jobId }) => {
-    console.log(`[lens:QueueEvents] Job ${jobId} completed`);
+    logInfo('Queue events completed', {
+      domain: 'queue',
+      event: 'queue_events_completed',
+      jobId,
+    });
   });
 
   events.on('failed', ({ jobId, failedReason }) => {
-    console.error(`[lens:QueueEvents] Job ${jobId} failed: ${failedReason}`);
+    logError('Queue events failed', {
+      domain: 'queue',
+      event: 'queue_events_failed',
+      jobId,
+      failedReason,
+    });
   });
 
   return events;
