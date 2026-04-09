@@ -26,9 +26,19 @@ export interface LensPayload {
 }
 
 // Job data queued in BullMQ
+export interface TelemetryCorrelation {
+  traceId?: string;
+  spanId?: string;
+  requestId?: string;
+  dispatchId?: string;
+  roomId?: string | null;
+  userId?: string | null;
+}
+
 export interface LensJob {
   url: string;
   uuid: string;
+  correlation?: TelemetryCorrelation;
 }
 
 // Result returned from a successful capture

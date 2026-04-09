@@ -1,12 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
-import { setupInterception, isAdUrl, isMediaUrl, classifyMedia } from './intercept.js';
+import { describe, expect, it, vi } from 'vitest';
+import { classifyMedia, isAdUrl, isMediaUrl, setupInterception } from './intercept.js';
+
+type SetupOptions = Parameters<typeof setupInterception>[0];
+type InterceptionContext = SetupOptions['context'];
+type InterceptionPage = SetupOptions['page'];
+type Handler = (...args: unknown[]) => unknown;
 
 function mockContext() {
-  const handlers: Record<string, Function[]> = {};
+  const handlers: Record<string, Handler[]> = {};
   return {
     route: vi.fn().mockResolvedValue(undefined),
     unroute: vi.fn().mockResolvedValue(undefined),
-    on: vi.fn((event: string, handler: Function) => {
+    on: vi.fn((event: string, handler: Handler) => {
       (handlers[event] ??= []).push(handler);
     }),
     off: vi.fn(),
@@ -14,11 +19,11 @@ function mockContext() {
   };
 }
 
-function mockPage() {
-  return {};
+function mockPage(): InterceptionPage {
+  return {} as InterceptionPage;
 }
 
-function mockAbortSignal() {
+function mockAbortSignal(): AbortSignal {
   return {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
@@ -53,8 +58,8 @@ describe('intercept.ts', () => {
     const onCandidate = vi.fn();
 
     const cleanup = setupInterception({
-      context: context as any,
-      page: page as any,
+      context: context as unknown as InterceptionContext,
+      page,
       abortSignal,
       onCandidate,
     });
@@ -62,7 +67,7 @@ describe('intercept.ts', () => {
     const responseHandler = context._handlers['response']?.[0];
     expect(responseHandler).toBeDefined();
 
-    await responseHandler({
+    await responseHandler?.({
       url: () => 'https://cdn.example.com/video.m3u8',
       headers: () => ({ 'content-type': 'application/vnd.apple.mpegurl' }),
       frame: () => ({ url: () => 'https://example.com' }),
@@ -86,8 +91,8 @@ describe('intercept.ts', () => {
     const onCandidate = vi.fn();
 
     setupInterception({
-      context: context as any,
-      page: page as any,
+      context: context as unknown as InterceptionContext,
+      page,
       abortSignal,
       onCandidate,
     });
@@ -95,7 +100,7 @@ describe('intercept.ts', () => {
     const responseHandler = context._handlers['response']?.[0];
     expect(responseHandler).toBeDefined();
 
-    await responseHandler({
+    await responseHandler?.({
       url: () => 'https://doubleclick.net/ads/video.mp4',
       headers: () => ({ 'content-type': 'video/mp4' }),
       frame: () => ({ url: () => 'https://example.com' }),
@@ -111,8 +116,8 @@ describe('intercept.ts', () => {
     const onCandidate = vi.fn();
 
     const cleanup = setupInterception({
-      context: context as any,
-      page: page as any,
+      context: context as unknown as InterceptionContext,
+      page,
       abortSignal,
       onCandidate,
     });

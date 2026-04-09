@@ -10,14 +10,70 @@ import { createQueue, startWorker, createQueueEvents } from './queue.js';
 import { writeEvent, closeSSE } from './sse.js';
 import { dedupCheck, dedupDelete } from './dedup.js';
 import { readKV } from './kv.js';
+import { storeUuidCorrelation } from './uuid-bridge.js';
+import { initializeTelemetry } from './telemetry/bootstrap.js';
+import { logInfo, logWarn } from './telemetry/logs.js';
 import type { CaptureResult, CaptureError } from './types.js';
 import type { Response } from 'express';
+import type { TelemetryCorrelation } from './types.js';
+
+await initializeTelemetry({
+  logger: {
+    warn: (message, meta) => {
+      logWarn(message, {
+        domain: 'other',
+        event: 'telemetry_bootstrap',
+        ...(meta ?? {}),
+      });
+    },
+    info: (message, meta) => {
+      logInfo(message, {
+        domain: 'other',
+        event: 'telemetry_bootstrap',
+        ...(meta ?? {}),
+      });
+    },
+  },
+});
 
 const app = express();
 app.use(express.json());
 
 const PORT = Number(process.env.LENS_PORT ?? 4000);
 const SHARED_SECRET = process.env.LENS_SHARED_SECRET ?? '';
+
+function parseTraceparent(traceparent: string | undefined): Pick<TelemetryCorrelation, 'traceId' | 'spanId'> {
+  if (!traceparent) {
+    return {};
+  }
+
+  const trimmed = traceparent.trim();
+  const parts = trimmed.split('-');
+  if (parts.length < 4) {
+    return {};
+  }
+
+  const traceId = parts[1];
+  const spanId = parts[2];
+  if (!traceId || !spanId) {
+    return {};
+  }
+
+  return { traceId, spanId };
+}
+
+function readCorrelation(req: express.Request): TelemetryCorrelation {
+  const traceparent = req.header('traceparent') ?? undefined;
+  const parsedTrace = parseTraceparent(traceparent);
+
+  return {
+    ...parsedTrace,
+    requestId: req.header('x-request-id') ?? undefined,
+    dispatchId: req.header('x-dispatch-id') ?? undefined,
+    roomId: req.header('x-room-id') ?? null,
+    userId: req.header('x-user-id') ?? null,
+  };
+}
 
 // Auth middleware
 function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction): void {
@@ -39,7 +95,7 @@ const activeStreams = new Map<string, Response>();
 // Queue setup
 const queue = createQueue();
 
-const worker = startWorker({
+const _worker = startWorker({
   onCompleted: (jobId: string, result: CaptureResult) => {
     const res = activeStreams.get(jobId);
     if (!res) return;
@@ -126,15 +182,36 @@ app.post('/capture', authMiddleware, async (req, res) => {
       await dedupDelete(url);
     }
   } catch (err) {
-    console.warn('[lens] Dedup check failed, proceeding with capture:', err);
+    logWarn('Dedup check failed, proceeding with capture', {
+      domain: 'other',
+      event: 'dedup_check_failed',
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // Enqueue capture job
   const uuid = uuidv4();
+  const correlation = readCorrelation(req);
   writeEvent(res, 'status', { status: 'queued', uuid });
 
   try {
-    const job = await queue.add('capture', { url, uuid }, { jobId: uuid });
+    const job = await queue.add('capture', { url, uuid, correlation }, { jobId: uuid });
+
+    try {
+      await storeUuidCorrelation(uuid, {
+        ...correlation,
+        traceparent: req.header('traceparent') ?? undefined,
+        baggage: req.header('baggage') ?? undefined,
+      });
+    } catch (bridgeErr) {
+      logWarn('UUID correlation bridge store failed', {
+        domain: 'other',
+        event: 'uuid_correlation_bridge_store_failed',
+        uuid,
+        err: bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr),
+      });
+    }
+
     activeStreams.set(job.id!, res);
 
     writeEvent(res, 'status', { status: 'processing' });
@@ -194,5 +271,10 @@ app.post('/relay/fetch', authMiddleware, async (req, res) => {
 
 // Start the server
 app.listen(PORT, () => {
-  console.log(`[lens] Server listening on port ${PORT}`);
+  logInfo('Server listening on port', {
+    domain: 'other',
+    event: 'server_start',
+    port: PORT,
+  });
 });
+

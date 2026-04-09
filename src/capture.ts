@@ -1,11 +1,58 @@
 import { chromium } from 'patchright';
 import { v4 as uuidv4 } from 'uuid';
+import { context, trace } from '@opentelemetry/api';
 import { runObservationLoop } from './pipeline/observation-loop.js';
 import { putKV } from './kv.js';
 import { dedupSet } from './dedup.js';
-import type { CaptureResult, LensPayload } from './types.js';
+import { buildCorrelationFields, redactTelemetryPayload } from './redaction.js';
+import { logError, logInfo, logWarn } from './telemetry/logs.js';
+import { recordCaptureLatency, recordCaptureOutcome, recordCaptureError } from './telemetry/metrics.js';
+import type { CaptureResult, LensPayload, TelemetryCorrelation } from './types.js';
 
 const CAPTURE_TIMEOUT_MS = 30_000;
+
+export function applyActiveSpanCorrelation(correlation: TelemetryCorrelation = {}): TelemetryCorrelation {
+  const activeSpanContext = trace.getSpan(context.active())?.spanContext();
+  if (!activeSpanContext) {
+    return correlation;
+  }
+
+  return {
+    ...correlation,
+    traceId: activeSpanContext.traceId || correlation.traceId,
+    spanId: activeSpanContext.spanId || correlation.spanId,
+  };
+}
+
+export function buildCaptureTelemetryPayload(
+  event: string,
+  correlation: TelemetryCorrelation = {},
+  payload: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return redactTelemetryPayload({
+    event,
+    ...buildCorrelationFields(correlation),
+    ...payload,
+  });
+}
+
+function logCaptureTelemetry(
+  level: 'info' | 'warn' | 'error',
+  event: string,
+  correlation: TelemetryCorrelation = {},
+  payload: Record<string, unknown> = {}
+): void {
+  const line = JSON.stringify(buildCaptureTelemetryPayload(event, correlation, payload));
+  if (level === 'error') {
+    logError(line);
+    return;
+  }
+  if (level === 'warn') {
+    logWarn(line);
+    return;
+  }
+  logInfo(line);
+}
 
 // Detect token expiry from URL query parameters
 function detectExpiry(url: string): number | null {
@@ -42,9 +89,15 @@ function detectExpiry(url: string): number | null {
 }
 
 // Capture media URL + headers from the given page URL, with a timeout and ad filtering
-export async function capture(url: string): Promise<CaptureResult> {
+export async function capture(url: string, correlation: TelemetryCorrelation = {}): Promise<CaptureResult> {
+  const captureStartTime = Date.now();
+  const runtimeCorrelation = applyActiveSpanCorrelation(correlation);
   const uuid = uuidv4();
   const abortController = new AbortController();
+
+  logCaptureTelemetry('info', 'capture_started', runtimeCorrelation, {
+    url,
+  });
 
   // Hard abort at CAPTURE_TIMEOUT_MS
   const timeout = setTimeout(() => abortController.abort(), CAPTURE_TIMEOUT_MS);
@@ -83,7 +136,8 @@ export async function capture(url: string): Promise<CaptureResult> {
     // patchright handles webdriver/plugins - only these remain:
     await context.addInitScript(() => {
       // patchright does NOT cover window.chrome
-      (window as any).chrome = { runtime: {} };
+      const windowWithChrome = window as unknown as { chrome?: { runtime: Record<string, unknown> } };
+      windowWithChrome.chrome = { runtime: {} };
 
       // Spoof userAgentData to match the chosen UA string
       Object.defineProperty(navigator, 'userAgentData', {
@@ -131,14 +185,23 @@ export async function capture(url: string): Promise<CaptureResult> {
       pageUrl: url, // used for Referer injection on alternatives
     });
 
-    console.info(
-      `[lens] Captured ${result.winner.url} (score: ${result.winner.score}, runner-up: ${result.runnerUpScore ?? 'none'}, candidates: ${result.candidateCount})`
-    );
+    logInfo('Captured media candidate', {
+      domain: 'capture',
+      event: 'capture_winner_selected',
+      url: result.winner.url,
+      score: result.winner.score,
+      runnerUpScore: result.runnerUpScore ?? null,
+      candidateCount: result.candidateCount,
+    });
 
     if (result.lowConfidence) {
-      console.warn(
-        `[lens] Low confidence capture for ${url} — best score: ${result.winner.score}, candidates: ${result.candidateCount}`
-      );
+      logWarn('Low confidence capture result', {
+        domain: 'capture',
+        event: 'capture_low_confidence',
+        url,
+        bestScore: result.winner.score,
+        candidateCount: result.candidateCount,
+      });
     }
 
     // Detect IP-bound token: some CDNs embed the capture IP in the path and reject
@@ -180,8 +243,46 @@ export async function capture(url: string): Promise<CaptureResult> {
     // Record dedup mapping
     await dedupSet(url, uuid);
 
+    logCaptureTelemetry('info', 'capture_completed', runtimeCorrelation, {
+      uuid,
+      mediaType: payload.mediaType,
+      lowConfidence: payload.lowConfidence,
+      ambiguous: payload.ambiguous,
+    });
+
+    // Record golden signal metrics
+    const mediaType = result.winner.mediaType;
+    const latency = Date.now() - captureStartTime;
+    recordCaptureLatency(mediaType, 'success', latency);
+    recordCaptureOutcome(mediaType, 'success');
+
     return { uuid, payload };
   } catch (error) {
+    const latency = Date.now() - captureStartTime;
+    
+    // Categorize error type for metrics
+    let errorType: 'capture-failure' | 'timeout' | 'network-error' | 'manifest-error' = 'capture-failure';
+    if (error && typeof error === 'object' && 'code' in error) {
+      const errorCode = (error as { code: string }).code;
+      if (errorCode === 'timeout') {
+        errorType = 'timeout';
+      } else if (errorCode === 'browser-launch-failed') {
+        errorType = 'network-error';
+      }
+    }
+
+    recordCaptureLatency('other', 'failure', latency);
+    recordCaptureOutcome('other', 'failure');
+    recordCaptureError('other', errorType);
+
+    logCaptureTelemetry('error', 'capture_failed', runtimeCorrelation, {
+      code: error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : 'browser-launch-failed',
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      errorType,
+      latencyMs: latency,
+    });
+
     // Re-throw with capture error shape if not already
     if (error && typeof error === 'object' && 'code' in error) {
       throw error;
@@ -195,3 +296,4 @@ export async function capture(url: string): Promise<CaptureResult> {
     await browser?.close().catch(() => {});
   }
 }
+

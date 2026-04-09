@@ -29,6 +29,7 @@ Create a `.env.local` file:
 ```bash
 # Server
 LENS_PORT=4000
+DEPLOYMENT_ENVIRONMENT=development
 LENS_SHARED_SECRET=your_shared_secret   # must match pipe's LENS_SHARED_SECRET
 
 # Redis (for BullMQ job queue + dedup)
@@ -45,6 +46,7 @@ PIPE_PROXY_URL=https://pipe.sideby.me   # or http://localhost:8787 for local dev
 # Optional
 LENS_CONCURRENCY=2        # number of parallel browser sessions
 LENS_KV_MAX_TTL_MS=3600000  # max payload TTL (default: 1 hour)
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ```
 
 > **Local dev note:** If running `pipe.sideby.me` with `wrangler dev --remote`, set `CF_KV_NAMESPACE_ID` to the `preview_id` from `pipe.sideby.me/wrangler.toml` so both services share the same KV namespace.

@@ -7,7 +7,6 @@ import { selectWinner, MIN_MEANINGFUL_SCORE } from '../scoring/select-winner.js'
 import { deduplicateVariants } from '../scoring/variant-dedup.js';
 import { CandidateStore } from '../scoring/candidate-store.js';
 import type { Candidate, ScoredCandidate, ManifestInfo, ScoreContext } from '../scoring/types.js';
-import type { WinnerResult } from '../scoring/select-winner.js';
 import type { VideoProbeResult } from '../extraction/dom-probe.js';
 import type { AlternativeEntry } from '../types.js';
 
@@ -41,7 +40,7 @@ export interface ObservationOptions {
  * If manifest has segments with byte ranges, compute actual bitrate.
  * Otherwise return null (unknown).
  */
-function estimateBitrate(manifest: ManifestInfo): number | null {
+function estimateBitrate(_manifest: ManifestInfo): number | null {
   // For now, return null — actual bitrate comes from master playlist
   // parsing which is a Phase 3 enhancement
   return null;
@@ -297,3 +296,5 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
 
 // Test-only export — allows unit testing of the pure helper without running the full loop
 export { buildAlternatives as _buildAlternatives };
+
+
