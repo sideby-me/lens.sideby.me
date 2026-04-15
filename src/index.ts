@@ -129,6 +129,13 @@ const _worker = startWorker({
 // Observability - logs completed/failed events from the queue for monitoring
 const _queueEvents = createQueueEvents();
 
+app.get('/_health', (_req, res) => {
+  res.status(200);
+  res.setHeader('content-type', 'text/plain; charset=utf-8');
+  res.setHeader('cache-control', 'no-store');
+  res.send("oh hello! it works btw, if that's what you are wondering");
+});
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'lens' });
 });
