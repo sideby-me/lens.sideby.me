@@ -1,6 +1,6 @@
 import type { Page, BrowserContext } from 'patchright';
 import { setupInterception } from '../extraction/intercept.js';
-import { probeVideoElement, clickLargestVideo } from '../extraction/dom-probe.js';
+import { probeVideoElement, clickLargestVideo, injectVideoElement } from '../extraction/dom-probe.js';
 import { scoreCandidate, filterMutedCandidates } from '../scoring/scorer.js';
 import { fetchAndParseManifest } from '../scoring/manifest-parser.js';
 import { selectWinner, MIN_MEANINGFUL_SCORE } from '../scoring/select-winner.js';
@@ -158,6 +158,14 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
         if (store.count() === 0) {
           clickAttempted = true;
           await clickLargestVideo(page).catch(() => {});
+          // 2s after click: if still no candidates, inject a hidden <video> pointing to the
+          // page URL. This triggers a video-type request (Accept: video/*) which some proxy
+          // endpoints (e.g. Cloudflare Workers) serve video for, even when they return HTML
+          // for main-page navigation requests.
+          setTimeout(async () => {
+            if (resolved || store.count() > 0) return;
+            await injectVideoElement(page, pageUrl).catch(() => {});
+          }, 2000);
         }
       }, NON_AUTOPLAY_WAIT_MS);
 

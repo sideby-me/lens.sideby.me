@@ -42,6 +42,23 @@ export async function probeVideoElement(page: Page, candidateUrl: string): Promi
 }
 
 /**
+ * Inject a hidden <video> element pointing to url and call load().
+ * This forces a video-type network request (Accept: video/*) to the URL,
+ * which is useful when the URL serves video bytes for video requests but
+ * HTML for main-page navigation requests.
+ */
+export async function injectVideoElement(page: Page, url: string): Promise<void> {
+  await page.evaluate((videoUrl: string) => {
+    const v = document.createElement('video');
+    v.preload = 'auto';
+    v.src = videoUrl;
+    Object.assign(v.style, { position: 'fixed', opacity: '0', width: '1px', height: '1px', pointerEvents: 'none' });
+    document.body?.appendChild(v);
+    v.load();
+  }, url).catch(() => {});
+}
+
+/**
  * Find the largest visible <video> or element with [data-video], [role="button"]
  * near a video across all accessible frames, and click it.
  * Returns true if a click was performed, false if no suitable element found.

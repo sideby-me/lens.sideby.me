@@ -128,15 +128,30 @@ export function setupInterception(opts: InterceptionOptions): () => void {
   }
 
   // Response handler: inspect content-type for media classification
-  async function responseHandler(response: { url(): string; headers(): Record<string, string>; frame(): { url(): string } | null | undefined }) {
+  async function responseHandler(response: { url(): string; headers(): Record<string, string>; frame(): { url(): string } | null | undefined; request(): { url(): string; redirectedFrom(): { url(): string; redirectedFrom(): unknown } | null } }) {
     const url = response.url();
     const contentType = response.headers()['content-type'] ?? '';
 
     if (isAdUrl(url)) return;
     if (!isMediaUrl(url, contentType)) return;
 
-    const reqHeaders = requestHeadersByUrl.get(url) ?? {};
-    const mediaType = classifyMedia(url, contentType);
+    // Walk the redirect chain to recover the original pre-redirect URL.
+    // Some proxy Workers embed auth in URL params (?headers=...) then redirect to a
+    // cleaner URL — using the original URL preserves that auth in the KV payload so
+    // pipe can replay segment requests with the right credentials.
+    let candidateUrl = url;
+    try {
+      let req = response.request();
+      while (req.redirectedFrom()) {
+        req = req.redirectedFrom() as typeof req;
+      }
+      if (req.url() !== url) candidateUrl = req.url();
+    } catch {
+      // ignore — redirectedFrom may not be available on all response types
+    }
+
+    const reqHeaders = requestHeadersByUrl.get(candidateUrl) ?? requestHeadersByUrl.get(url) ?? {};
+    const mediaType = classifyMedia(candidateUrl, contentType);
 
     let frameUrl: string | null = null;
     try {
@@ -146,7 +161,7 @@ export function setupInterception(opts: InterceptionOptions): () => void {
     }
 
     opts.onCandidate({
-      url,
+      url: candidateUrl,
       headers: reqHeaders,
       mediaType,
       capturedAt: Date.now(),
