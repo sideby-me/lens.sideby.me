@@ -1,4 +1,4 @@
-export type CaptureErrorCode = 'only-ads-detected' | 'timeout' | 'no-media-found' | 'browser-launch-failed';
+export type CaptureErrorCode = 'only-ads-detected' | 'timeout' | 'no-media-found' | 'browser-launch-failed' | 'navigation-failed';
 
 // LENS-03: Alternative stream entry for ambiguous/low-confidence payloads
 export interface AlternativeEntry {

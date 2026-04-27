@@ -266,7 +266,7 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
       const errorCode = (error as { code: string }).code;
       if (errorCode === 'timeout') {
         errorType = 'timeout';
-      } else if (errorCode === 'browser-launch-failed') {
+      } else if (errorCode === 'navigation-failed' || errorCode === 'browser-launch-failed') {
         errorType = 'network-error';
       }
     }
@@ -287,9 +287,17 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     if (error && typeof error === 'object' && 'code' in error) {
       throw error;
     }
+    const msg = error instanceof Error ? error.message : String(error);
+    const isNavError =
+      msg.includes('ERR_CONNECTION_TIMED_OUT') ||
+      msg.includes('ERR_CONNECTION_REFUSED') ||
+      msg.includes('ERR_NAME_NOT_RESOLVED') ||
+      msg.includes('ERR_ABORTED') ||
+      msg.includes('net::ERR_') ||
+      msg.includes('page.goto');
     throw {
-      code: 'browser-launch-failed' as const,
-      message: error instanceof Error ? error.message : String(error),
+      code: isNavError ? ('navigation-failed' as const) : ('browser-launch-failed' as const),
+      message: msg,
     };
   } finally {
     clearTimeout(timeout);
