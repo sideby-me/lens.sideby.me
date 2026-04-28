@@ -6,7 +6,7 @@ if (fs.existsSync('.env.local')) {
 dotenv.config();
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { createQueue, startWorker, createQueueEvents } from './queue.js';
+import { createQueue, startWorker } from './queue.js';
 import { writeEvent, closeSSE } from './sse.js';
 import { dedupCheck, dedupDelete } from './dedup.js';
 import { readKV } from './kv.js';
@@ -126,8 +126,6 @@ const _worker = startWorker({
   },
 });
 
-// Observability - logs completed/failed events from the queue for monitoring
-const _queueEvents = createQueueEvents();
 
 app.get('/_health', (_req, res) => {
   res.status(200);

@@ -10,7 +10,7 @@ import type { CaptureResult, LensJob, CaptureError, TelemetryCorrelation } from 
 import type { QueueCorrelationPayload } from './telemetry/queue-correlation.js';
 
 const QUEUE_NAME = 'lens-capture';
-const QUEUE_METRICS_INTERVAL_MS = 15000;
+const QUEUE_METRICS_INTERVAL_MS = 300_000; // 5 minutes
 
 // Initialize queue metrics once
 createQueueMetrics();
