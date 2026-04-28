@@ -1,6 +1,6 @@
 import type { Page, BrowserContext } from 'patchright';
 import { setupInterception } from '../extraction/intercept.js';
-import { probeVideoElement, clickLargestVideo, injectVideoElement } from '../extraction/dom-probe.js';
+import { probeVideoElement, clickLargestVideo, injectVideoElement, extractIframeInfos, clickStreamingSourceButton } from '../extraction/dom-probe.js';
 import { scoreCandidate, filterMutedCandidates } from '../scoring/scorer.js';
 import { fetchAndParseManifest } from '../scoring/manifest-parser.js';
 import { selectWinner, MIN_MEANINGFUL_SCORE } from '../scoring/select-winner.js';
@@ -9,6 +9,7 @@ import { CandidateStore } from '../scoring/candidate-store.js';
 import type { Candidate, ScoredCandidate, ManifestInfo, ScoreContext } from '../scoring/types.js';
 import type { VideoProbeResult } from '../extraction/dom-probe.js';
 import type { AlternativeEntry } from '../types.js';
+import { isAdUrl, classifyMedia } from '../extraction/intercept.js';
 
 const EARLY_STOP_THRESHOLD = Number(process.env.EARLY_STOP_THRESHOLD ?? 70);
 const MIN_OBSERVATION_MS = Number(process.env.MIN_OBSERVATION_MS ?? 5000);
@@ -33,6 +34,7 @@ export interface ObservationOptions {
   abortSignal: AbortSignal;
   navigationStart: number; // Date.now() at page navigation
   pageUrl: string; // The URL Lens navigated to, used for Referer injection on alternatives
+  watcherUrls?: string[]; // media URLs discovered by the in-page XHR/Fetch watcher script
 }
 
 /**
@@ -166,6 +168,28 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
             if (resolved || store.count() > 0) return;
             await injectVideoElement(page, pageUrl).catch(() => {});
           }, 2000);
+          // 4s after click: if still no candidates, try streaming source buttons
+          // (server/embed selectors) then navigate to any video iframe found.
+          setTimeout(async () => {
+            if (resolved || store.count() > 0) return;
+            // Try clicking a streaming source/server button first, then wait for
+            // an iframe to appear (some sites inject the player only after a click).
+            await clickStreamingSourceButton(page).catch(() => {});
+            setTimeout(async () => {
+              if (resolved || store.count() > 0) return;
+              const iframeInfos = await extractIframeInfos(page).catch(() => [] as { src: string; area: number }[]);
+              const iframeUrl = iframeInfos.length > 0
+                ? (iframeInfos.find(i => i.area > 40000) ?? iframeInfos[0]).src
+                : null;
+              if (iframeUrl && iframeUrl !== pageUrl) {
+                await page.goto(iframeUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+                setTimeout(async () => {
+                  if (resolved || store.count() > 0) return;
+                  await clickLargestVideo(page).catch(() => {});
+                }, 2000);
+              }
+            }, 1500);
+          }, 4000);
         }
       }, NON_AUTOPLAY_WAIT_MS);
 
@@ -186,6 +210,27 @@ export async function runObservationLoop(opts: ObservationOptions): Promise<Obse
       // Poll every 1000ms to probe, parse manifests, score, check early stop
       const pollInterval = setInterval(async () => {
         if (resolved) return;
+
+        // Drain watcher-discovered URLs (from in-page XHR/Fetch interceptor)
+        if (opts.watcherUrls && opts.watcherUrls.length > 0) {
+          while (opts.watcherUrls.length > 0) {
+            const wu = opts.watcherUrls.shift()!;
+            const alreadySeen = store.list().some(c => c.url === wu);
+            if (!isAdUrl(wu) && !alreadySeen) {
+              store.add({
+                url: wu,
+                headers: {},
+                mediaType: classifyMedia(wu),
+                capturedAt: Date.now(),
+                area: null,
+                muted: false,
+                precededByEndedStream: false,
+                bitrate: null,
+              });
+            }
+          }
+        }
+
         await probeAndScore();
 
         const elapsed = Date.now() - navigationStart;

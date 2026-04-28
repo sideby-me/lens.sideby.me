@@ -1,4 +1,5 @@
 import { chromium } from 'patchright';
+import { WATCHER_SCRIPT } from './extraction/intercept.js';
 import { v4 as uuidv4 } from 'uuid';
 import { context, trace } from '@opentelemetry/api';
 import { runObservationLoop } from './pipeline/observation-loop.js';
@@ -168,6 +169,13 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     // Create page first so we can pass it to setupInterception for load+settle
     const page = await context.newPage();
 
+    // Expose callback for the watcher script, then inject it before navigation.
+    const watcherUrls: string[] = [];
+    await page.exposeFunction('__lensReportMedia', (url: string) => {
+      watcherUrls.push(url);
+    });
+    await context.addInitScript(WATCHER_SCRIPT);
+
     // Navigate
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
@@ -182,7 +190,8 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
       page,
       abortSignal: abortController.signal,
       navigationStart,
-      pageUrl: url, // used for Referer injection on alternatives
+      pageUrl: url,
+      watcherUrls,
     });
 
     logInfo('Captured media candidate', {
@@ -259,7 +268,7 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     return { uuid, payload };
   } catch (error) {
     const latency = Date.now() - captureStartTime;
-    
+
     // Categorize error type for metrics
     let errorType: 'capture-failure' | 'timeout' | 'network-error' | 'manifest-error' = 'capture-failure';
     if (error && typeof error === 'object' && 'code' in error) {
@@ -276,7 +285,10 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     recordCaptureError('other', errorType);
 
     logCaptureTelemetry('error', 'capture_failed', runtimeCorrelation, {
-      code: error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : 'browser-launch-failed',
+      code:
+        error && typeof error === 'object' && 'code' in error
+          ? (error as { code: string }).code
+          : 'browser-launch-failed',
       message: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
       errorType,
@@ -304,4 +316,3 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     await browser?.close().catch(() => {});
   }
 }
-

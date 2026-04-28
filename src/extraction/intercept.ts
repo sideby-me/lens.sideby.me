@@ -1,5 +1,83 @@
 import type { BrowserContext, Page, Route } from 'patchright';
 
+// Injected into the page's JS context to intercept XHR/Fetch and extract media URLs
+// embedded in JSON API responses (e.g. {"file":"https://cdn.../movie.m3u8?token=..."}).
+// Calls window.__lensReportMedia(url) which is exposed via page.exposeFunction before goto.
+export const WATCHER_SCRIPT = `
+(function () {
+  if (window.__lensWatcherInjected) return;
+  window.__lensWatcherInjected = true;
+
+  var VIDEO_KEYS = ['file','video_url','video','source','src','stream_url','media_url','url','hls','m3u8','link'];
+  var MEDIA_PATTERN = /https?:\\/\\/[^\\s"',\\]\\[<>]+\\.(?:m3u8|mp4)(?:[?&#][^\\s"',\\]\\[<>]*)?/gi;
+
+  function report(url) {
+    if (typeof window.__lensReportMedia === 'function') {
+      try { window.__lensReportMedia(url); } catch(e) {}
+    }
+  }
+
+  function scanText(text) {
+    if (!text || text.length > 300000) return;
+    var matches = text.match(MEDIA_PATTERN) || [];
+    for (var i = 0; i < matches.length; i++) {
+      report(matches[i].replace(/[;)"'\`]+$/, ''));
+    }
+    try {
+      var data = JSON.parse(text);
+      scanObj(data, 0);
+    } catch(e) {}
+  }
+
+  function scanObj(obj, depth) {
+    if (depth > 10 || !obj || typeof obj !== 'object') return;
+    for (var k in obj) {
+      if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+      var val = obj[k];
+      if (VIDEO_KEYS.indexOf(k) !== -1 && typeof val === 'string' && /\\.(?:m3u8|mp4)(\\?|$)/i.test(val)) {
+        report(val);
+      } else if (typeof val === 'object') {
+        scanObj(val, depth + 1);
+      }
+    }
+  }
+
+  function shouldScan(ct) {
+    return ct && (ct.indexOf('json') !== -1 || ct.indexOf('text/plain') !== -1 || ct.indexOf('mpegurl') !== -1);
+  }
+
+  var origOpen = XMLHttpRequest.prototype.open;
+  var origSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function(m, url) {
+    this._lensUrl = url;
+    return origOpen.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function() {
+    this.addEventListener('load', function() {
+      try {
+        var ct = this.getResponseHeader('content-type') || '';
+        if (shouldScan(ct)) scanText(this.responseText);
+      } catch(e) {}
+    });
+    return origSend.apply(this, arguments);
+  };
+
+  var origFetch = window.fetch;
+  window.fetch = function() {
+    var args = arguments;
+    return origFetch.apply(this, args).then(function(resp) {
+      try {
+        var ct = resp.headers.get('content-type') || '';
+        if (shouldScan(ct)) {
+          resp.clone().text().then(scanText).catch(function(){});
+        }
+      } catch(e) {}
+      return resp;
+    });
+  };
+})();
+`;
+
 // Ad network domains and path patterns to let through (not abort)
 const AD_DOMAINS = ['doubleclick.net', 'googlesyndication.com', '2mdn.net', 'ads.youtube.com', 'imasdk.googleapis.com'];
 

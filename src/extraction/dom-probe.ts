@@ -42,6 +42,73 @@ export async function probeVideoElement(page: Page, candidateUrl: string): Promi
 }
 
 /**
+ * Extract the src of the largest visible iframe on the page.
+ * Used to navigate directly to cross-origin video player embeds when no media
+ * is detected after the main page loads.
+ */
+export interface IframeInfo {
+  src: string;
+  area: number;
+}
+
+/**
+ * Extract all iframes from the page with their src and area.
+ * Returns all iframes (including small/hidden ones) sorted by area descending.
+ */
+export async function extractIframeInfos(page: Page): Promise<IframeInfo[]> {
+  try {
+    const result = await page.evaluate(() => {
+      const iframes = Array.from(document.querySelectorAll('iframe'));
+      return iframes
+        .map(iframe => {
+          const rect = iframe.getBoundingClientRect();
+          const src = iframe.src || iframe.getAttribute('data-src') || '';
+          return { src, area: rect.width * rect.height };
+        })
+        .filter(c => c.src)
+        .sort((a, b) => b.area - a.area);
+    });
+    return result ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Click common "load player" / source-selection buttons found on streaming sites
+ * (server tabs, embed buttons, watch buttons) when no video elements are present.
+ * Returns true if a click was performed.
+ */
+export async function clickStreamingSourceButton(page: Page): Promise<boolean> {
+  try {
+    const result = await page.evaluate(() => {
+      const PATTERNS = [
+        /server/i, /source/i, /watch/i, /stream/i, /play/i, /embed/i, /episode/i,
+      ];
+      const els = Array.from(
+        document.querySelectorAll('button, [role="button"], [role="tab"], a[href="#"], a[href="javascript:void(0)"]')
+      ) as HTMLElement[];
+      for (const el of els) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 20 || rect.height < 10) continue;
+        const text = (el.textContent ?? '') + ' ' + (el.className ?? '') + ' ' + (el.getAttribute('data-id') ?? '');
+        if (PATTERNS.some(p => p.test(text))) {
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          return { x: cx, y: cy };
+        }
+      }
+      return null;
+    });
+    if (!result) return false;
+    await page.mouse.click(result.x, result.y);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Inject a hidden <video> element pointing to url and call load().
  * This forces a video-type network request (Accept: video/*) to the URL,
  * which is useful when the URL serves video bytes for video requests but
