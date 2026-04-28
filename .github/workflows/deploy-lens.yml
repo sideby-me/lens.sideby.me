@@ -3,8 +3,6 @@ name: Deploy lens
 on:
   push:
     branches: [main]
-    paths:
-      - lens.sideby.me/**
 
 jobs:
   deploy:
