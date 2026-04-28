@@ -1,0 +1,24 @@
+name: Deploy lens
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - lens.sideby.me/**
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Droplet
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.LENS_HOST }}
+          username: deploy
+          key: ${{ secrets.LENS_SSH_KEY }}
+          script: |
+            set -e
+            cd /home/deploy/sideby.me
+            git pull origin main
+            cd lens.sideby.me
+            docker compose up -d --build
