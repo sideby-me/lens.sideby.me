@@ -110,6 +110,7 @@ export async function initializeTelemetry(options: InitializeTelemetryOptions = 
     const logUrl = `${endpoint}/v1/logs`;
 
     const sdk = new NodeSDK({
+      autoDetectResources: false,
       resource: resourceFromAttributes(resourceAttributes),
       traceExporter: new OTLPTraceExporter({
         url: traceUrl,
@@ -129,7 +130,11 @@ export async function initializeTelemetry(options: InitializeTelemetryOptions = 
           })
         ),
       ],
-      instrumentations: [getNodeAutoInstrumentations()],
+      instrumentations: [
+        getNodeAutoInstrumentations({
+          '@opentelemetry/instrumentation-runtime-node': { enabled: false },
+        }),
+      ],
     });
 
     const starter = options.sdkFactory ?? (async (instance: NodeSDK) => instance.start());
