@@ -19,5 +19,4 @@ jobs:
             set -e
             cd /home/deploy/sideby.me
             git pull origin main
-            cd lens.sideby.me
             docker compose up -d --build
