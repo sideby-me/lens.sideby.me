@@ -14,6 +14,7 @@ jobs:
           host: ${{ secrets.LENS_HOST }}
           username: deploy
           key: ${{ secrets.LENS_SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
           script: |
             set -e
             cd /home/deploy/sideby.me
