@@ -1,4 +1,5 @@
 import { chromium } from 'patchright';
+import { getNextProxy } from './proxy-pool.js';
 import { WATCHER_SCRIPT } from './extraction/intercept.js';
 import { v4 as uuidv4 } from 'uuid';
 import { context, trace } from '@opentelemetry/api';
@@ -103,12 +104,18 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
   // Hard abort at CAPTURE_TIMEOUT_MS
   const timeout = setTimeout(() => abortController.abort(), CAPTURE_TIMEOUT_MS);
 
+  const proxyServer = getNextProxy();
+  if (proxyServer) {
+    logInfo('Using proxy for capture', { domain: 'capture', event: 'capture_proxy_selected', proxy: proxyServer });
+  }
+
   let browser;
   try {
     // Launch patchright's chromium - patches WebDriver fingerprints at binary level
     browser = await chromium.launch({
       channel: 'chrome',
       headless: true,
+      ...(proxyServer ? { proxy: { server: proxyServer } } : {}),
       args: [
         '--disable-blink-features=AutomationControlled',
         '--disable-infobars',
@@ -244,6 +251,7 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
       ambiguous: result.ambiguous, // LENS-02
       alternatives: result.alternatives, // LENS-03
       ipBound: ipBound || undefined, // omit false to keep payload lean
+      proxyServer: proxyServer ?? undefined,
     };
 
     // Write to KV

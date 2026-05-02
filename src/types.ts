@@ -23,6 +23,7 @@ export interface LensPayload {
   ambiguous: boolean; // LENS-02: winner/runner-up gap below threshold
   alternatives: AlternativeEntry[]; // LENS-03: sorted non-winner candidates
   ipBound?: boolean; // token path encodes the capture IP — pipe must relay through home server
+  proxyServer?: string; // proxy used for this capture (from LENS_PROXY_POOL), if any
 }
 
 // Job data queued in BullMQ
