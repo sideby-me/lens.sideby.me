@@ -240,6 +240,8 @@ export function startWorker(callbacks: QueueCallbacks): Worker<LensJob, CaptureR
     {
       connection: getConnection(),
       concurrency,
+      stalledInterval: 300_000,
+      drainDelay: 30_000,
     }
   );
 
