@@ -2,8 +2,10 @@
 
 ```
 src/
-├── index.ts                    # Express server, /capture SSE, /relay/fetch, health
+├── index.ts                    # Express server, /capture SSE (rate-limited), /relay/fetch, health
 ├── capture.ts                  # Capture orchestrator: browser → observation → KV write
+├── rate-limiter.ts             # Fixed-window Redis counter; checkRateLimit(key, max, windowMs)
+├── proxy-pool.ts               # Round-robin SOCKS5/HTTP proxy selection; getNextProxy()
 ├── queue.ts                    # BullMQ queue + worker setup, job correlation
 ├── queue-metrics.ts            # Observable gauges: queue depth + wait-age
 ├── dedup.ts                    # Redis-backed URL deduplication

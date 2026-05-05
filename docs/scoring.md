@@ -70,6 +70,7 @@ What gets stored in Cloudflare KV per UUID:
   ambiguous: boolean
   alternatives: AlternativeEntry[]
   ipBound?: boolean                   // true → pipe must route via /relay/fetch
+  proxyServer?: string                // SOCKS5/HTTP proxy used during capture (from LENS_PROXY_POOL)
 }
 
 interface AlternativeEntry {
