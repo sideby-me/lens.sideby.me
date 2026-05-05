@@ -13,6 +13,7 @@ import { readKV } from './kv.js';
 import { storeUuidCorrelation } from './uuid-bridge.js';
 import { initializeTelemetry } from './telemetry/bootstrap.js';
 import { logInfo, logWarn } from './telemetry/logs.js';
+import { checkRateLimit } from './rate-limiter.js';
 import type { CaptureResult, CaptureError } from './types.js';
 import type { Response } from 'express';
 import type { TelemetryCorrelation } from './types.js';
@@ -41,6 +42,8 @@ app.use(express.json());
 
 const PORT = Number(process.env.LENS_PORT ?? 4000);
 const SHARED_SECRET = process.env.LENS_SHARED_SECRET ?? '';
+const RATE_LIMIT_MAX = Number(process.env.LENS_RATE_LIMIT_MAX ?? 3);
+const RATE_LIMIT_WINDOW_MS = Number(process.env.LENS_RATE_LIMIT_WINDOW_MS ?? 60_000);
 
 function parseTraceparent(traceparent: string | undefined): Pick<TelemetryCorrelation, 'traceId' | 'spanId'> {
   if (!traceparent) {
@@ -152,6 +155,33 @@ app.post('/capture', authMiddleware, async (req, res) => {
   } catch {
     res.status(400).json({ error: 'Invalid URL' });
     return;
+  }
+
+  // Per-room rate limit check (before SSE headers are sent)
+  const roomId = req.header('x-room-id');
+  const userId = req.header('x-user-id');
+  const rlKey = roomId ? `room:${roomId}` : userId ? `user:${userId}` : 'global';
+  try {
+    const rl = await checkRateLimit(rlKey, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
+    if (!rl.allowed) {
+      logWarn('Lens capture rate limit exceeded', {
+        domain: 'other',
+        event: 'rate_limit_exceeded',
+        rlKey,
+        retryAfterMs: rl.retryAfterMs,
+      });
+      res.status(429).json({
+        error: 'Too many capture requests. Please wait a moment before trying again.',
+        retryAfterMs: rl.retryAfterMs,
+      });
+      return;
+    }
+  } catch (err) {
+    logWarn('Rate limit check failed, allowing request', {
+      domain: 'other',
+      event: 'rate_limit_check_failed',
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // Set up SSE response
