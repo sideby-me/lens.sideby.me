@@ -12,7 +12,8 @@ return {count, ttl}
 `;
 
 declare module 'ioredis' {
-  interface RedisCommander<_Context> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface RedisCommander<Context> {
     incrAndExpire(key: string, windowMs: string): Promise<[number, number]>;
   }
 }
