@@ -11,6 +11,7 @@ import { logError, logInfo, logWarn } from './telemetry/logs.js';
 import { recordCaptureLatency, recordCaptureOutcome, recordCaptureError } from './telemetry/metrics.js';
 import type { CaptureResult, LensPayload, TelemetryCorrelation } from './types.js';
 import { detectExpiry } from './extraction/expiry.js';
+import { tryYtdlp } from './extraction/ytdlp.js';
 
 const CAPTURE_TIMEOUT_MS = 30_000;
 
@@ -57,6 +58,28 @@ function logCaptureTelemetry(
   logInfo(line);
 }
 
+// Private helper — defined inside capture.ts module scope (not exported)
+async function finishCapture(
+  uuid: string,
+  payload: LensPayload,
+  captureMethod: 'ytdlp' | 'chromium',
+  correlation: TelemetryCorrelation,
+  startTime: number,
+  originalUrl: string // page URL for dedupSet — NOT payload.mediaUrl (see Pitfall 1)
+): Promise<void> {
+  await putKV(uuid, payload, payload.expiresAt);
+  await dedupSet(originalUrl, uuid);
+  logCaptureTelemetry('info', 'capture_completed', correlation, {
+    uuid,
+    mediaType: payload.mediaType,
+    captureMethod, // TELE-02: new field
+    lowConfidence: payload.lowConfidence,
+    ambiguous: payload.ambiguous,
+  });
+  recordCaptureLatency(payload.mediaType, 'success', Date.now() - startTime);
+  recordCaptureOutcome(payload.mediaType, 'success');
+}
+
 // Capture media URL + headers from the given page URL, with a timeout and ad filtering
 export async function capture(url: string, correlation: TelemetryCorrelation = {}): Promise<CaptureResult> {
   const captureStartTime = Date.now();
@@ -74,6 +97,28 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
   const proxyServer = getNextProxy();
   if (proxyServer) {
     logInfo('Using proxy for capture', { domain: 'capture', event: 'capture_proxy_selected', proxy: proxyServer });
+  }
+
+  // PROC-05: yt-dlp timeout default 8s leaves 22s for Chromium within CAPTURE_TIMEOUT_MS (30s)
+  const ytdlpResult = await tryYtdlp(url, runtimeCorrelation, abortController.signal);
+  if (ytdlpResult) {
+    const maxTtlMs = Number(process.env.LENS_KV_MAX_TTL_MS ?? 3_600_000);
+    const now = Date.now();
+    const payload: LensPayload = {
+      mediaUrl: ytdlpResult.mediaUrl,
+      headers: {},
+      mediaType: ytdlpResult.mediaType,
+      capturedAt: now,
+      expiresAt: detectExpiry(ytdlpResult.mediaUrl) ?? now + maxTtlMs,
+      isLive: ytdlpResult.isLive,
+      lowConfidence: false,
+      ambiguous: false,
+      alternatives: [],
+      // ipBound and proxyServer intentionally omitted for yt-dlp hits (D-06)
+    };
+    await finishCapture(uuid, payload, 'ytdlp', runtimeCorrelation, captureStartTime, url);
+    clearTimeout(timeout);
+    return { uuid, payload };
   }
 
   let browser;
@@ -221,25 +266,7 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
       proxyServer: proxyServer ?? undefined,
     };
 
-    // Write to KV
-    await putKV(uuid, payload, expiresAt);
-
-    // Record dedup mapping
-    await dedupSet(url, uuid);
-
-    logCaptureTelemetry('info', 'capture_completed', runtimeCorrelation, {
-      uuid,
-      mediaType: payload.mediaType,
-      lowConfidence: payload.lowConfidence,
-      ambiguous: payload.ambiguous,
-    });
-
-    // Record golden signal metrics
-    const mediaType = result.winner.mediaType;
-    const latency = Date.now() - captureStartTime;
-    recordCaptureLatency(mediaType, 'success', latency);
-    recordCaptureOutcome(mediaType, 'success');
-
+    await finishCapture(uuid, payload, 'chromium', runtimeCorrelation, captureStartTime, url);
     return { uuid, payload };
   } catch (error) {
     const latency = Date.now() - captureStartTime;
