@@ -12,7 +12,7 @@ return {count, ttl}
 `;
 
 declare module 'ioredis' {
-  interface RedisCommander<Context> {
+  interface RedisCommander<_Context> {
     incrAndExpire(key: string, windowMs: string): Promise<[number, number]>;
   }
 }
