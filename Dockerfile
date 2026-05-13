@@ -7,6 +7,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
+ARG YTDLP_VERSION=2026.05.05.233942
+RUN curl -fsSL "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/${YTDLP_VERSION}/yt-dlp_linux" -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp
+
 RUN npx patchright install chrome
 
 COPY . .
