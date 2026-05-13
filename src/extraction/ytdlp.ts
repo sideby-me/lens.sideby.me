@@ -73,7 +73,6 @@ export async function tryYtdlp(
     binary,
     [
       '--dump-json',
-      '--no-simulate',
       '--no-playlist',
       '--playlist-items', '1',
       '--max-downloads', '1',
