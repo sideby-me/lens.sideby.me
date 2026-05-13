@@ -10,6 +10,12 @@ export interface YtDlpResult {
   isLive?: boolean;
 }
 
+// yt-dlp exit code 101 means MaxDownloadsReached — raised after successfully
+// processing --max-downloads N items. With --max-downloads 1 this is the
+// normal termination path: JSON has already been written to stdout.
+// Treat it the same as exit 0 — attempt to parse stdout before giving up.
+const YTDLP_MAX_DOWNLOADS_REACHED = 101;
+
 function logYtdlpTelemetry(
   level: 'info' | 'warn' | 'error',
   event: string,
@@ -134,7 +140,12 @@ export async function tryYtdlp(
         return;
       }
 
-      if (code !== 0) {
+      // Exit code 101 (MaxDownloadsReached) is expected when --max-downloads 1
+      // is set: yt-dlp writes the JSON to stdout then exits 101 after the first
+      // item. Fall through to stdout parsing so we don't discard a valid result.
+      const isSuccess = code === 0 || code === YTDLP_MAX_DOWNLOADS_REACHED;
+
+      if (!isSuccess) {
         logYtdlpTelemetry('warn', 'ytdlp_failure', correlation, {
           reason: 'non-zero exit',
           exitCode: code,
@@ -150,6 +161,7 @@ export async function tryYtdlp(
       if (!result) {
         logYtdlpTelemetry('warn', 'ytdlp_failure', correlation, {
           reason: 'json-parse-failed',
+          exitCode: code,
         });
         resolve(null);
         return;
