@@ -100,13 +100,13 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
   }
 
   // PROC-05: yt-dlp timeout default 8s leaves 22s for Chromium within CAPTURE_TIMEOUT_MS (30s)
-  const ytdlpResult = await tryYtdlp(url, runtimeCorrelation, abortController.signal);
+  const ytdlpResult = await tryYtdlp(url, runtimeCorrelation, abortController.signal, proxyServer ?? undefined);
   if (ytdlpResult) {
     const maxTtlMs = Number(process.env.LENS_KV_MAX_TTL_MS ?? 3_600_000);
     const now = Date.now();
     const payload: LensPayload = {
       mediaUrl: ytdlpResult.mediaUrl,
-      headers: {},
+      headers: ytdlpResult.headers,
       mediaType: ytdlpResult.mediaType,
       capturedAt: now,
       expiresAt: detectExpiry(ytdlpResult.mediaUrl) ?? now + maxTtlMs,

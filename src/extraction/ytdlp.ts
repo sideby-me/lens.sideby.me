@@ -8,6 +8,7 @@ export interface YtDlpResult {
   mediaUrl: string;
   mediaType: 'hls' | 'mp4' | 'other';
   isLive?: boolean;
+  headers: Record<string, string>;
 }
 
 // yt-dlp exit code 101 means MaxDownloadsReached — raised after successfully
@@ -44,6 +45,7 @@ function parseYtdlpOutput(json: string): YtDlpResult | null {
     const protocol = (data['protocol'] as string | undefined) ?? '';
     const ext = (data['ext'] as string | undefined) ?? '';
     const liveStatus = data['live_status'] as string | undefined;
+    const rawHeaders = (data['http_headers'] as Record<string, string> | undefined) ?? {};
 
     let mediaType: 'hls' | 'mp4' | 'other';
     if (protocol === 'm3u8' || protocol === 'm3u8_native') {
@@ -58,6 +60,7 @@ function parseYtdlpOutput(json: string): YtDlpResult | null {
       mediaUrl: url,
       mediaType,
       isLive: liveStatus === 'is_live' ? true : undefined,
+      headers: rawHeaders,
     };
   } catch {
     return null;
@@ -67,7 +70,8 @@ function parseYtdlpOutput(json: string): YtDlpResult | null {
 export async function tryYtdlp(
   url: string,
   correlation: TelemetryCorrelation,
-  signal: AbortSignal
+  signal: AbortSignal,
+  proxy?: string
 ): Promise<YtDlpResult | null> {
   const binary = process.env.LENS_YTDLP_PATH ?? 'yt-dlp';
   const timeoutMs = Number(process.env.LENS_YTDLP_TIMEOUT_MS ?? 8_000);
@@ -80,14 +84,25 @@ export async function tryYtdlp(
     [
       '--dump-json',
       '--no-playlist',
-      '--playlist-items', '1',
-      '--max-downloads', '1',
+      '--playlist-items',
+      '1',
+      '--max-downloads',
+      '1',
       '--no-warnings',
       '--quiet',
       '--skip-download',
-      '--socket-timeout', '5',
-      '--retries', '2',
-      '-f', 'best[ext=mp4]/best[ext=webm]/best',
+      '--socket-timeout',
+      '5',
+      '--retries',
+      '2',
+      // curl-cffi TLS impersonation — makes the TLS client-hello look like Chrome,
+      // bypassing WAF fingerprint blocks that cause ConnectionResetError
+      '--impersonate',
+      'chrome',
+      ...(proxy ? ['--proxy', proxy] : []),
+      // best* includes video-only streams; best requires combined A+V
+      '-f',
+      'best*[ext=mp4]/best*[ext=webm]/best*',
       url,
     ],
     { stdio: ['ignore', 'pipe', 'pipe'] }
@@ -115,7 +130,7 @@ export async function tryYtdlp(
   }
   signal.addEventListener('abort', abortHandler, { once: true });
 
-  return new Promise<YtDlpResult | null>((resolve) => {
+  return new Promise<YtDlpResult | null>(resolve => {
     proc.on('error', (err: NodeJS.ErrnoException) => {
       clearTimeout(killTimer);
       signal.removeEventListener('abort', abortHandler);
