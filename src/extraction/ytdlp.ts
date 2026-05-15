@@ -67,6 +67,34 @@ function parseYtdlpOutput(json: string): YtDlpResult | null {
   }
 }
 
+/**
+ * Build extra CLI args from environment variables:
+ *
+ * LENS_YTDLP_COOKIES_FILE — path to a Netscape-format cookies file.
+ *
+ * LENS_YTDLP_EXTRA_ARGS — space-separated extra arguments appended verbatim
+ *   after the fixed arg list. Escape hatch for operator-specific needs such as
+ *   `--netrc`, `--geo-bypass`, `--proxy socks5://...`, `--user-agent "..."`.
+ *   Arguments containing spaces must be quoted with single or double quotes
+ *   (standard shell quoting is NOT applied — split is on whitespace only, so
+ *   prefer LENS_YTDLP_COOKIES_FILE for paths with spaces).
+ */
+function buildExtraArgs(): string[] {
+  const extra: string[] = [];
+
+  const cookiesFile = process.env.LENS_YTDLP_COOKIES_FILE?.trim();
+  if (cookiesFile) {
+    extra.push('--cookies', cookiesFile);
+  }
+
+  const extraArgsRaw = process.env.LENS_YTDLP_EXTRA_ARGS?.trim();
+  if (extraArgsRaw) {
+    extra.push(...extraArgsRaw.split(/\s+/).filter(Boolean));
+  }
+
+  return extra;
+}
+
 export async function tryYtdlp(
   url: string,
   correlation: TelemetryCorrelation,
@@ -100,6 +128,8 @@ export async function tryYtdlp(
       '--impersonate',
       'chrome',
       ...(proxy ? ['--proxy', proxy] : []),
+      // Operator-supplied cookies file and/or extra args (age-gate bypass, netrc, etc.)
+      ...buildExtraArgs(),
       // best* includes video-only streams; best requires combined A+V
       '-f',
       'best*[ext=mp4]/best*[ext=webm]/best*',
