@@ -4,13 +4,16 @@ A headless browser service that extracts real media URLs from video pages for Si
 
 ## What it does
 
+- **yt-dlp fast path** — tries yt-dlp extraction first (8 s timeout) before launching Chromium
 - Launches a stealth Chromium browser (patchright) to extract media URLs from JS-heavy sites
-- Intercepts network requests to detect HLS manifests and MP4 streams
+- Intercepts network requests to detect HLS manifests and MP4 streams; scores candidates to pick the best stream
 - Captures auth headers alongside media URLs for token-gated content
 - Detects token expiry from URL params (`exp=`, `X-Amz-Expires`) and sets matching KV TTL
 - Stores payloads in Cloudflare KV with TTL-based expiry
 - Streams capture progress back to the caller via SSE
 - Deduplicates captures within a configurable window (default 5 min)
+- Per-room/user rate limiting to prevent capture storms
+- Optional HTTP/SOCKS proxy pool rotation (`LENS_PROXY_POOL`)
 
 ## Getting Started
 
@@ -43,9 +46,13 @@ CF_API_TOKEN=your_api_token
 PIPE_PROXY_URL=https://pipe.sideby.me   # or http://localhost:8787
 
 # Optional
-LENS_CONCURRENCY=2            # parallel browser sessions (default: 2)
-LENS_KV_MAX_TTL_MS=3600000    # max payload TTL (default: 1 hour)
-LENS_DEDUP_TTL_S=300          # dedup window in seconds (default: 300)
+LENS_CONCURRENCY=2              # parallel BullMQ worker slots (default: 2)
+LENS_KV_MAX_TTL_MS=3600000      # max payload TTL in ms (default: 3600000)
+LENS_DEDUP_TTL_S=300            # dedup window in seconds (default: 300)
+LENS_YTDLP_TIMEOUT_MS=8000      # yt-dlp fast path timeout in ms (default: 8000)
+LENS_RATE_LIMIT_MAX=3           # max captures per window per room/user (default: 3)
+LENS_RATE_LIMIT_WINDOW_MS=60000 # rate limit window in ms (default: 60000)
+LENS_PROXY_POOL=                # comma-separated HTTP/SOCKS proxy URLs (optional)
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ```
 
@@ -100,7 +107,7 @@ Authenticate with `X-Lens-Secret` header.
 |-------|---------|-------------|
 | `status` | `"queued"` | Job enqueued |
 | `status` | `"processing"` | Browser running |
-| `done` | `{ uuid, playbackUrl, mediaType, expiresAt }` | Success |
+| `done` | `{ uuid, playbackUrl, mediaType, expiresAt, lowConfidence, ambiguous, alternatives }` | Success |
 | `error` | `{ code, message }` | Failure |
 
 The `playbackUrl` is a `pipe.sideby.me?uuid=<uuid>` URL. `pipe.sideby.me` reads the KV payload by UUID and proxies the stream with the captured headers.
@@ -116,36 +123,42 @@ Internal endpoint used by `pipe.sideby.me` for IP-bound token relay. Not for ext
 ## How It Works
 
 1. `POST /capture` arrives with a URL
-2. **Dedup check** — if the same URL was captured recently and the KV payload is still valid, return immediately
-3. **Job enqueued** in BullMQ; SSE `status: queued` sent
-4. **Browser launched** — stealth Chromium with patched fingerprints (no webdriver signals, spoofed UA client hints)
-5. **Network interception** — every request/response inspected for media content types (`.m3u8`, `.mp4`, `.ts`, `video/*`)
-6. **HLS found** → resolve immediately; **MP4/other** → wait for page load + settle window
-7. **Token expiry** detected from URL params and set as KV TTL
-8. **Payload written** to Cloudflare KV: `{ mediaUrl, headers, mediaType, expiresAt }`
-9. **SSE `done`** sent with `{ uuid, playbackUrl, mediaType, expiresAt }`
-10. `pipe.sideby.me` reads the KV payload by UUID and proxies the stream
+2. **Rate limit check** — per-room/user sliding window; returns `429` if exceeded
+3. **Dedup check** — if the same URL was captured recently and the KV payload is still valid, return immediately
+4. **Job enqueued** in BullMQ; SSE `status: queued` → `status: processing` sent
+5. **yt-dlp fast path** — tried first with a short timeout (default 8 s); if it succeeds, skips Chromium entirely
+6. **Browser launched** (if yt-dlp missed) — stealth Chromium with patched fingerprints (no webdriver signals, spoofed UA client hints); optional proxy from pool
+7. **Network interception** — every request/response inspected for media content types (`.m3u8`, `.mp4`, `.ts`, `video/*`)
+8. **Scoring** — candidates ranked by type, size, and signal strength; winner selected; `lowConfidence`/`ambiguous` flags set when the result is uncertain
+9. **Token expiry** detected from URL params and set as KV TTL
+10. **Payload written** to Cloudflare KV: `{ mediaUrl, headers, mediaType, expiresAt, lowConfidence, ambiguous, alternatives, ipBound? }`
+11. **SSE `done`** sent with `{ uuid, playbackUrl, mediaType, expiresAt, lowConfidence, ambiguous, alternatives }`
+12. `pipe.sideby.me` reads the KV payload by UUID and proxies the stream; IP-bound tokens are relayed back through `/relay/fetch`
 
 ## Project Structure
 
 ```
 src/
-├── index.ts            # Express server, /capture SSE endpoint
-├── capture.ts          # Capture job orchestration
-├── queue.ts            # BullMQ queue + worker setup
+├── index.ts            # Express server, POST /capture (SSE), POST /relay/fetch, health
+├── capture.ts          # Capture orchestration: yt-dlp fast path → Chromium fallback
+├── queue.ts            # BullMQ queue + worker (concurrency: LENS_CONCURRENCY)
 ├── dedup.ts            # Redis-backed deduplication
 ├── kv.ts               # Cloudflare KV REST API client
 ├── sse.ts              # SSE response helpers
-├── uuid-bridge.ts      # UUID ↔ KV key mapping
+├── uuid-bridge.ts      # UUID → correlation context mapping in Redis
+├── proxy-pool.ts       # HTTP/SOCKS proxy rotation (LENS_PROXY_POOL)
+├── rate-limiter.ts     # Per-room/user sliding window rate limiter
 ├── redaction.ts        # Credential redaction for logs
-├── types.ts            # Shared types
+├── types.ts            # Shared types (LensPayload, LensJob, CaptureResult, …)
 ├── extraction/
-│   ├── intercept.ts    # Network request interception
-│   └── dom-probe.ts    # DOM-level video element detection
+│   ├── intercept.ts    # Network request interception + WATCHER_SCRIPT
+│   ├── dom-probe.ts    # DOM-level video element detection
+│   ├── ytdlp.ts        # yt-dlp fast-path extraction
+│   └── expiry.ts       # Token expiry detection from URL params
 ├── pipeline/
-│   └── observation-loop.ts  # Browser lifecycle + event loop
-├── scoring/            # Video candidate scoring + manifest parsing
-└── telemetry/          # OTEL setup
+│   └── observation-loop.ts  # Browser lifecycle + candidate collection loop
+├── scoring/            # Candidate scoring, manifest parsing, winner selection
+└── telemetry/          # OTEL bootstrap, metrics, logs
 ```
 
 ## Contributing
