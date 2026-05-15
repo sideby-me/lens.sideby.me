@@ -1,4 +1,5 @@
-import { chromium } from 'patchright';
+import { getBrowser } from './browser-pool.js';
+import type { BrowserContext } from 'patchright';
 import { getNextProxy } from './proxy-pool.js';
 import { WATCHER_SCRIPT } from './extraction/intercept.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -121,29 +122,10 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     return { uuid, payload };
   }
 
-  let browser;
+  let browserCtx: BrowserContext | undefined;
   try {
-    // Launch patchright's chromium - patches WebDriver fingerprints at binary level
-    browser = await chromium.launch({
-      channel: 'chrome',
-      headless: true,
-      ...(proxyServer ? { proxy: { server: proxyServer } } : {}),
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--disable-infobars',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--use-gl=angle',
-        '--use-angle=gl',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
-
-    // Context with UA + UA Client Hints alignment
-    const context = await browser.newContext({
+    const browser = await getBrowser();
+    browserCtx = await browser.newContext({
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       extraHTTPHeaders: {
@@ -151,10 +133,11 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
         'Sec-CH-UA-Mobile': '?0',
         'Sec-CH-UA-Platform': '"Windows"',
       },
+      ...(proxyServer ? { proxy: { server: proxyServer } } : {}),
     });
 
     // patchright handles webdriver/plugins - only these remain:
-    await context.addInitScript(() => {
+    await browserCtx.addInitScript(() => {
       // patchright does NOT cover window.chrome
       const windowWithChrome = window as unknown as { chrome?: { runtime: Record<string, unknown> } };
       windowWithChrome.chrome = { runtime: {} };
@@ -186,14 +169,14 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     });
 
     // Create page first so we can pass it to setupInterception for load+settle
-    const page = await context.newPage();
+    const page = await browserCtx.newPage();
 
     // Expose callback for the watcher script, then inject it before navigation.
     const watcherUrls: string[] = [];
     await page.exposeFunction('__lensReportMedia', (url: string) => {
       watcherUrls.push(url);
     });
-    await context.addInitScript(WATCHER_SCRIPT);
+    await browserCtx.addInitScript(WATCHER_SCRIPT);
 
     // Navigate
     await page.goto(url, {
@@ -205,7 +188,7 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
 
     // Run the observation pipeline
     const result = await runObservationLoop({
-      context,
+      context: browserCtx,
       page,
       abortSignal: abortController.signal,
       navigationStart,
@@ -315,6 +298,6 @@ export async function capture(url: string, correlation: TelemetryCorrelation = {
     };
   } finally {
     clearTimeout(timeout);
-    await browser?.close().catch(() => {});
+    await browserCtx?.close().catch(() => {});
   }
 }
