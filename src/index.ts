@@ -12,6 +12,7 @@ import { dedupCheck, dedupDelete } from './dedup.js';
 import { readKV } from './kv.js';
 import { storeUuidCorrelation } from './uuid-bridge.js';
 import { initializeTelemetry } from './telemetry/bootstrap.js';
+import { initBrowserPool, shutdownBrowserPool } from './browser-pool.js';
 import { logInfo, logWarn } from './telemetry/logs.js';
 import { checkRateLimit } from './rate-limiter.js';
 import type { CaptureResult, CaptureError } from './types.js';
@@ -35,6 +36,12 @@ await initializeTelemetry({
       });
     },
   },
+});
+
+await initBrowserPool();
+logInfo('Browser pool initialized', {
+  domain: 'other',
+  event: 'browser_pool_ready',
 });
 
 const app = express();
@@ -129,6 +136,16 @@ const _worker = startWorker({
   },
 });
 
+
+process.on('SIGTERM', async () => {
+  logInfo('Received SIGTERM, draining...', {
+    domain: 'other',
+    event: 'sigterm_received',
+  });
+  await _worker.close();
+  await shutdownBrowserPool();
+  process.exit(0);
+});
 
 app.get('/_health', (_req, res) => {
   res.status(200);
