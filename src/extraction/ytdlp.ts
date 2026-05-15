@@ -127,8 +127,9 @@ export async function tryYtdlp(
       // bypassing WAF fingerprint blocks that cause ConnectionResetError
       '--impersonate',
       'chrome',
+      '--netrc',
       ...(proxy ? ['--proxy', proxy] : []),
-      // Operator-supplied cookies file and/or extra args (age-gate bypass, netrc, etc.)
+      // Operator-supplied cookies file and/or extra args (age-gate bypass, etc.)
       ...buildExtraArgs(),
       // best* includes video-only streams; best requires combined A+V
       '-f',

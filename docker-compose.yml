@@ -8,3 +8,4 @@ services:
     shm_size: 1gb
     volumes:
       - ./cookies.txt:/run/secrets/ytdlp-cookies.txt
+      - ./.netrc:/root/.netrc:ro
